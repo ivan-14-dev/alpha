@@ -85,3 +85,12 @@ CREATE TABLE IF NOT EXISTS comments (
   author_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS listings (
+  id TEXT PRIMARY KEY, seller_id TEXT NOT NULL REFERENCES users(id),
+  project_id TEXT REFERENCES projects(id), title TEXT NOT NULL, description TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('software','component','prototype','service','concept')),
+  price_cents INTEGER NOT NULL CHECK(price_cents > 0),
+  license TEXT NOT NULL, deliverables TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
