@@ -101,3 +101,15 @@ CREATE TABLE IF NOT EXISTS orders (
   delivery_text TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS transactions (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+  campaign_id TEXT REFERENCES campaigns(id), mission_id TEXT REFERENCES missions(id),
+  order_id TEXT REFERENCES orders(id), kind TEXT NOT NULL CHECK(kind IN ('funding','payout','purchase','sale','refund')),
+  amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+  status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed','pending','failed')),
+  mode TEXT NOT NULL DEFAULT 'demo' CHECK(mode = 'demo'),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_mission_payout ON transactions(mission_id) WHERE kind = 'payout';
+CREATE UNIQUE INDEX IF NOT EXISTS unique_order_purchase ON transactions(order_id) WHERE kind = 'purchase';
+CREATE UNIQUE INDEX IF NOT EXISTS unique_order_sale ON transactions(order_id) WHERE kind = 'sale';
