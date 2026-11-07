@@ -133,3 +133,9 @@ CREATE TABLE IF NOT EXISTS messages (
   sender_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+  link TEXT NOT NULL DEFAULT '/', read_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
