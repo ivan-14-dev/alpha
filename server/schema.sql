@@ -20,3 +20,13 @@ CREATE TABLE IF NOT EXISTS organization_members (
   user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL DEFAULT 'member',
   PRIMARY KEY (organization_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  organization_id TEXT REFERENCES organizations(id), title TEXT NOT NULL,
+  summary TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'prototype', visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','private')),
+  repo_url TEXT NOT NULL DEFAULT '', demo_url TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]', color TEXT NOT NULL DEFAULT '#6658e8',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
