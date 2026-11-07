@@ -21,3 +21,32 @@ export function ErrorState({ message }: { message: string }) {
 export function Loading() { return <div className="loading" role="status"><LoaderCircle className="spin" size={22} /> Chargement…</div>; }
 export function DemoNotice() { return <div className="demo-notice"><span className="status-dot" /> Mode démonstration — aucun argent réel n’est débité ou versé.</div>; }
 export function LoginNotice() { return <EmptyState title="Rejoignez le collectif" description="Connectez-vous pour participer et retrouver votre activité." action={<Link className="button button-primary" to="/login">Se connecter <ArrowUpRight size={16} /></Link>} />; }
+export function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
+  const dialog = useRef<HTMLElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    const previous = document.activeElement;
+    const overflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusable = () => [...(dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]') ?? [])];
+    focusable()[0]?.focus();
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close.current();
+      if (event.key === 'Tab') {
+        const elements = focusable();
+        const first = elements[0];
+        const last = elements[elements.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => {
+      document.removeEventListener('keydown', handler);
+      document.body.style.overflow = overflow;
+      if (previous instanceof HTMLElement) previous.focus();
+    };
+  }, []);
+  return <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialog} className="modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Fermer"><X size={20} /></button></div>{children}</section></div>;
+}
