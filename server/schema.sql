@@ -30,3 +30,12 @@ CREATE TABLE IF NOT EXISTS projects (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS campaigns (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+  owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, description TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'usability', reward_cents INTEGER NOT NULL CHECK(reward_cents > 0),
+  slots INTEGER NOT NULL CHECK(slots BETWEEN 1 AND 100),
+  requirements TEXT NOT NULL DEFAULT '', target_devices TEXT NOT NULL DEFAULT 'Web',
+  deadline TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
