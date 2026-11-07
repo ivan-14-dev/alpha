@@ -15,3 +15,6 @@ export function Avatar({ name, color = '#6658e8', size = 'normal' }: { name: str
 export function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
   return <div className="empty-state"><div className="empty-symbol">✦</div><h3>{title}</h3>{description && <p>{description}</p>}{action}</div>;
 }
+export function ErrorState({ message }: { message: string }) {
+  return message ? <div className="alert alert-error" role="alert">{message}</div> : null;
+}
