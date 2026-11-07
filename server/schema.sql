@@ -152,3 +152,14 @@ CREATE TABLE IF NOT EXISTS audit_events (
   target_type TEXT NOT NULL, target_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS integrations (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+  provider TEXT NOT NULL CHECK(provider IN ('github','gitlab','linear','figma')),
+  url TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(project_id,provider)
+);
+CREATE INDEX IF NOT EXISTS campaign_project ON campaigns(project_id);
+CREATE INDEX IF NOT EXISTS mission_tester ON missions(tester_id);
+CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id,read_at);
+CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at);
