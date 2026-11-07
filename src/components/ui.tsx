@@ -18,3 +18,4 @@ export function EmptyState({ title, description, action }: { title: string; desc
 export function ErrorState({ message }: { message: string }) {
   return message ? <div className="alert alert-error" role="alert">{message}</div> : null;
 }
+export function Loading() { return <div className="loading" role="status"><LoaderCircle className="spin" size={22} /> Chargement…</div>; }
