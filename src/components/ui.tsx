@@ -9,3 +9,6 @@ export function PageHeader({ eyebrow, title, description, action }: { eyebrow?: 
 export function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: string }) {
   return <span className={`badge badge-${tone}`}>{children}</span>;
 }
+export function Avatar({ name, color = '#6658e8', size = 'normal' }: { name: string; color?: string; size?: 'small' | 'normal' | 'large' }) {
+  return <span className={`avatar avatar-${size}`} style={{ backgroundColor: color }} aria-label={name}>{name.split(' ').map((word) => word[0]).slice(0, 2).join('').toUpperCase()}</span>;
+}
