@@ -46,3 +46,18 @@ CREATE TABLE IF NOT EXISTS applications (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   UNIQUE(campaign_id,tester_id)
 );
+CREATE TABLE IF NOT EXISTS missions (
+  id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  tester_id TEXT NOT NULL REFERENCES users(id), application_id TEXT NOT NULL UNIQUE REFERENCES applications(id),
+  status TEXT NOT NULL DEFAULT 'assigned' CHECK(status IN ('assigned','in_progress','submitted','changes_requested','accepted','disputed','paid','cancelled')),
+  decision_note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS test_reports (
+  id TEXT PRIMARY KEY, mission_id TEXT NOT NULL UNIQUE REFERENCES missions(id),
+  summary TEXT NOT NULL, steps TEXT NOT NULL, expected TEXT NOT NULL,
+  observed TEXT NOT NULL, evidence_url TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
