@@ -71,3 +71,17 @@ CREATE TABLE IF NOT EXISTS group_members (
   group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
   user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(group_id,user_id)
 );
+CREATE TABLE IF NOT EXISTS posts (
+  id TEXT PRIMARY KEY, author_id TEXT NOT NULL REFERENCES users(id),
+  group_id TEXT REFERENCES groups(id), body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS post_likes (
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(post_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS comments (
+  id TEXT PRIMARY KEY, post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  author_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
