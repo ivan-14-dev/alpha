@@ -74,3 +74,95 @@ Depuis la V2, `schema_migrations` conserve la version, le nom, l'empreinte SHA-2
 
 La migration `003-professional.sql` ajoute les favoris, le versionnement et l'historique des commandes, ainsi que des identifiants publics de session. Les valeurs existantes, y compris les cookies encore valides, sont conservées. Les dates historiques absentes restent inconnues ; aucune opération financière n'est créée par la migration.
 
+## Cycles de vie
+
+### Projet et collaboration
+
+Un membre crée un projet public ou privé et peut le rattacher à une organisation autorisée. Un projet public est consultable sans compte. Un projet privé est accessible à son propriétaire, aux membres de son organisation et aux testeurs disposant d'une mission non annulée rattachée au projet.
+
+La gestion du projet est réservée à son propriétaire ou aux membres de l'organisation disposant du rôle `owner` ou `admin`. Les rôles d'organisation sont distincts du rôle d'administrateur de plateforme. Les droits de responsable d'une campagne restent attachés à `campaigns.owner_id` : gérer un projet ne donne pas automatiquement toutes les actions financières d'une campagne créée par un autre membre.
+
+L'ajout de membres d'organisation porte sur des comptes existants, par invitation interne et consentement explicite ; aucun email n'est envoyé. Le propriétaire propose le rôle `member` ou `admin`, jamais `owner`. Le destinataire accepte ou décline, et une invitation expire après sept jours. Le propriétaire peut la révoquer. Un membre ordinaire peut quitter l'organisation, mais le propriétaire ne peut pas laisser une équipe sans responsable.
+
+Le parcours V1 d'ajout direct est volontairement restreint : `POST /api/people/organizations/:id/members` refuse de créer un nouveau membre et exige une invitation. Il conserve la modification d'un rôle existant ; le nouveau `PATCH .../members/:userId` est le parcours explicite. Aucun ancien client ne peut contourner le consentement en utilisant l'ancienne route.
+
+Les profils publics ne constituent pas un annuaire des adresses email. Une invitation en attente ne donne ni accès aux membres de l'équipe ni aux projets privés. Le retrait ou le départ d'un membre révoque ses accès d'équipe immédiatement ; ses éventuels droits indépendants de propriétaire de projet ou de testeur restent distincts.
+
+### Réseau et publications de projet
+
+Les abonnements sont des relations uniques en base. Un membre ne peut pas se suivre lui-même ; l'ajout répété d'un abonnement ne crée ni doublon ni nouvelle notification. Le fil personnalisé combine ses propres publications, celles des membres suivis, les actualités des projets suivis et les groupes rejoints, sans modifier la visibilité des contenus.
+
+Une publication peut appartenir à un groupe **ou** à un projet, pas aux deux. Les actualités de projet sont publiques et réservées aux responsables d'un projet public ; ce ne sont pas des notes confidentielles d'équipe. Si le projet devient privé, les publications liées disparaissent de tous les fils, du tableau de bord et des accès directs aux commentaires et réactions, même pour leur auteur. Les abonnements ne donnent pas accès au projet privé. Une notification déjà reçue ne constitue jamais une autorisation d'accès.
+
+### Atelier d'équipe
+
+Le tableau de tâches d'un projet est privé à son propriétaire et aux membres de son organisation, même lorsque sa fiche projet est publique. Un testeur affecté à une campagne ne devient pas automatiquement collaborateur : `canCollaborateProject` est distinct de `canReadProject`.
+
+Les responsables créent, attribuent et organisent les tâches ; un destinataire encore membre de l'équipe peut changer l'état de sa tâche, mais pas ses consignes ou son attribution. Les états sont `todo`, `in_progress` et `done`, avec priorité, échéance facultative et description. Les tâches ne déclenchent aucun paiement et ne remplacent pas les missions du laboratoire.
+
+Chaque tâche possède une `version`. Une modification ou suppression doit présenter la version observée ; une version périmée produit un conflit explicite plutôt qu'une perte silencieuse des modifications d'un autre membre. Les droits et l'éligibilité du destinataire sont vérifiés dans la transaction. Un ancien membre ne conserve pas ses droits sur une tâche du seul fait qu'il y est encore nommé.
+
+### Recherche publique et bibliothèque privée
+
+La recherche V3 réunit les projets publics, leurs campagnes, les offres actives et les profils publics. Elle ne recherche pas dans les emails, messages, rapports, tâches ou livraisons. Les filtres et la pagination s'appliquent côté SQL, avec un ordre stable et des caractères `%`, `_` et `\` traités littéralement dans la saisie.
+
+Les favoris utilisent une clé unique `(user_id,target_type,target_id)` et ne déclenchent aucune notification. Leur liste appartient uniquement à la session courante. Une jointure avec les ressources actuellement visibles filtre à la fois les lignes et les compteurs ; même le propriétaire d'un projet privé ne le retrouve pas par cette surface publique. Les références masquées restent enregistrées et peuvent réapparaître si la ressource redevient publique ; leur suppression par leur propriétaire ne nécessite pas qu'elles soient encore visibles. Un favori n'accorde aucun droit ni réservation.
+
+### Test et versement de démonstration
+
+1. Le responsable crée une campagne avec un projet, des consignes, une récompense, un nombre de places et une échéance.
+2. Il finance explicitement un budget fictif, plafonné au budget prévu. Une campagne créée n'est pas financée automatiquement.
+3. Un autre membre accessible à la campagne candidate : `pending` → `accepted` ou `rejected`. Une candidature ne constitue pas encore une mission.
+4. La sélection exige une campagne ouverte, une échéance non dépassée, une place disponible et un budget disponible suffisant. Elle crée une mission `assigned`.
+5. Le testeur commence (`in_progress`) et soumet son rapport (`submitted`). Une soumission directe depuis `assigned` est aussi permise.
+6. Le responsable accepte (`accepted`) ou demande des corrections (`changes_requested`). Le testeur corrige réellement le rapport avant de le soumettre à nouveau.
+7. Après acceptation, le responsable déclenche séparément le versement simulé : `accepted` → `paid`.
+
+```text
+assigned → in_progress → submitted → accepted → paid (démo)
+assigned ──────────────→ submitted
+submitted → changes_requested → submitted (rapport corrigé)
+```
+
+Le rapport est du texte structuré : synthèse, étapes, résultat attendu, résultat observé et URL de preuve facultative. Alpha ne vérifie pas automatiquement la qualité du test ni l'authenticité d'une preuve.
+
+Le budget disponible est calculé ainsi :
+
+```text
+financements terminés − versements terminés − récompenses réservées
+```
+
+Les missions ni payées ni annulées réservent leur récompense, y compris pendant une correction ou un litige. Un nouveau déclenchement d'un versement déjà effectué retourne l'état payé sans créer une seconde écriture.
+
+Un litige avant paiement fait passer la mission à `disputed` et bloque le versement normal. La modération peut décider d'une reprise compatible avec les données existantes ou d'une annulation. Aucun règlement ni remboursement automatique n'accompagne cette décision.
+
+### Commande de marketplace
+
+Une offre `active` décrit un produit ou service, un prix fictif, des livrables et une licence **non exclusive**. Elle peut être archivée pour arrêter les nouveaux achats. Après la première commande, les conditions de l'offre sont figées ; une autre offre doit être créée pour les changer.
+
+```text
+achat simulé → paid → delivered → completed
+                        livraison   acceptation acheteur
+```
+
+L'achat inscrit une transaction `purchase`. Le vendeur saisit ensuite un `delivery_text` privé. L'acceptation par l'acheteur inscrit le gain fictif `sale` du vendeur. L'acheteur ne peut pas acheter sa propre offre.
+
+En V3, une demande motivée de correction ramène une commande livrée à `paid`, avec `revision_requested=1`. L'ancienne livraison reste consultable mais n'est plus acceptable : le vendeur doit en envoyer une version différente, qui remet l'état à `delivered` et efface le drapeau. Les changements, demandes et livraisons alimentent `order_events`, dans la même transaction que l'état, les notifications, l'audit et les éventuelles écritures financières.
+
+La `version` de commande est obligatoire pour livrer, demander une correction ou accepter. Les versions périmées sont rejetées avec HTTP 409 ; une acceptation ne doit jamais être réessayée automatiquement après relecture. Une répétition d'acceptation d'une commande déjà terminée ne crée pas un deuxième gain fictif. Les transitions de litige participent aussi au versionnement ; une ancienne livraison ne permet pas à la modération de contourner une correction encore attendue.
+
+L'historique est paginé et privé aux participants. La modération conserve son accès contextuel à la dernière livraison et à l'état de la commande, pas une lecture générale des historiques. La migration reprend les anciens textes de livraison dans un événement `legacy_delivery` à date inconnue (`NULL`), sans attribuer artificiellement la date d'achat à leur livraison. Elle ne modifie ni les conditions commerciales historiques ni les montants.
+
+Avant achèvement, un litige peut suspendre la commande (`disputed`). La modération peut la faire reprendre à `paid` ou `delivered` selon les preuves présentes. Les valeurs de schéma `refunded` et `refund` ne signifient pas qu'un service de remboursement réel, ou même un parcours automatique de remboursement, est implémenté.
+
+La publication d'un concept ne prouve ni sa nouveauté, ni sa protection, ni les droits du vendeur. Alpha n'effectue pas de transfert légal automatique de marque, brevet ou droit d'auteur.
+
+### Avis, échanges et modération
+
+- Un avis devient possible après l'état `paid` d'une mission et concerne l'autre participant. Une seule évaluation par auteur et mission est autorisée. Le badge « vérifié » signifie **relation avec une mission payée en simulation**, pas identité vérifiée, transaction bancaire réelle ou certification de compétence.
+- En V2, les notes de communication et de qualité sont facultatives, de 1 à 5. Les valeurs V1 restent `NULL` et sont exclues des moyennes détaillées. Chaque critère affiche son propre nombre de contributions ; le rôle évalué est déduit de la mission. Les jalons sont factuels, pas un score global de fiabilité. L'historique public n'affiche que des projets actuellement publics ; aucun pourcentage de ponctualité n'est calculé à partir de dates V1 insuffisantes.
+- Les groupes communautaires et leurs publications sont publics. L'adhésion nécessaire pour publier dans un groupe ne rend pas les échanges confidentiels.
+- Une conversation est consultable par ses membres. Les notifications appartiennent à leur destinataire et restent internes à l'application : aucun email ou SMS n'est envoyé.
+- Un signalement appartient à son auteur et à la modération. Il passe de `open` à `reviewing`, puis à `resolved` ou `dismissed`. Les décisions et opérations suivies alimentent le journal d'audit.
+- Lorsqu'un objet reste en litige, la clôture du dernier dossier actif exige un état de reprise explicite. L'administrateur peut consulter le contexte nécessaire, dont le rapport ou le texte de livraison concerné. Clôturer un signalement n'est pas une suppression automatique de contenu.
+
