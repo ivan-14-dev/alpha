@@ -50,3 +50,17 @@ export function Modal({ title, children, onClose }: { title: string; children: R
   }, []);
   return <div className="modal-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}><section ref={dialog} className="modal" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><h2>{title}</h2><button className="icon-button" onClick={onClose} aria-label="Fermer"><X size={20} /></button></div>{children}</section></div>;
 }
+export function useApi<T>(path: string | null) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(!!path);
+  const [error, setError] = useState('');
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    let active = true;
+    if (!path) { setData(null); setLoading(false); setError(''); return; }
+    setLoading(true); setData(null); setError('');
+    api<T>(path).then((value) => { if (active) setData(value); }).catch((error) => { if (active) setError(errorMessage(error)); }).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [path, revision]);
+  return { data, loading, error, reload: () => setRevision((value) => value + 1) };
+}
