@@ -139,3 +139,11 @@ CREATE TABLE IF NOT EXISTS notifications (
   link TEXT NOT NULL DEFAULT '/', read_at TEXT,
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS moderation_reports (
+  id TEXT PRIMARY KEY, reporter_id TEXT NOT NULL REFERENCES users(id),
+  target_type TEXT NOT NULL CHECK(target_type IN ('project','post','listing','mission','order','user')),
+  target_id TEXT NOT NULL, reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','reviewing','resolved','dismissed')),
+  decision TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
