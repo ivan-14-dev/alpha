@@ -61,3 +61,13 @@ CREATE TABLE IF NOT EXISTS test_reports (
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS groups (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#6658e8',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(group_id,user_id)
+);
