@@ -94,3 +94,10 @@ CREATE TABLE IF NOT EXISTS listings (
   status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
   created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
 );
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY, listing_id TEXT NOT NULL REFERENCES listings(id),
+  buyer_id TEXT NOT NULL REFERENCES users(id), seller_id TEXT NOT NULL REFERENCES users(id),
+  price_cents INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'paid' CHECK(status IN ('paid','delivered','completed','disputed','refunded')),
+  delivery_text TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
