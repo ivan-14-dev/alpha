@@ -166,3 +166,49 @@ La publication d'un concept ne prouve ni sa nouveauté, ni sa protection, ni les
 - Un signalement appartient à son auteur et à la modération. Il passe de `open` à `reviewing`, puis à `resolved` ou `dismissed`. Les décisions et opérations suivies alimentent le journal d'audit.
 - Lorsqu'un objet reste en litige, la clôture du dernier dossier actif exige un état de reprise explicite. L'administrateur peut consulter le contexte nécessaire, dont le rapport ou le texte de livraison concerné. Clôturer un signalement n'est pas une suppression automatique de contenu.
 
+## Frontières de confiance et limites
+
+### Identité et accès
+
+Les mots de passe sont dérivés avec `scrypt` et un sel aléatoire. Le cookie contient un jeton aléatoire ; seul son condensat SHA-256 est stocké avec l'expiration de session. Les sessions durent sept jours. Le cookie est `HttpOnly`, `SameSite=Lax`, et `Secure` lorsque `NODE_ENV=production`.
+
+La V3 expose au titulaire une liste paginée de ses sessions actives avec un identifiant public opaque distinct du jeton et de son condensat. Les sessions héritées gardent une date de création inconnue. Aucun suivi d'adresse IP ou d'appareil n'est ajouté. Le titulaire peut révoquer une autre session ou toutes les autres ; la session courante utilise le bouton de déconnexion.
+
+Changer le mot de passe nécessite le mot de passe actuel. Le nouveau hash, la révocation des anciennes sessions et la création de la session de remplacement sont atomiques. Les vérifications asynchrones du mot de passe ne constituent pas une autorisation durable : la session et le hash observé sont revalidés avant validation de la transaction.
+
+Les requêtes API modifiantes exigent l'en-tête `X-Alpha-Client: web` et vérifient l'origine lorsqu'elle est présente, avec `APP_ORIGIN` comme configuration explicite. L'interface fournit cet en-tête ; les clients API écrits séparément doivent le fournir aussi. Ce mécanisme complète le cookie, sans constituer une authentification à lui seul.
+
+Les autorisations sont contrôlées côté serveur sur les ressources et les participants, pas seulement par l'affichage des boutons. L'administrateur de plateforme n'obtient pas une lecture générale de toutes les conversations ou de tous les projets privés ; les outils de modération lui donnent un accès contextuel aux éléments signalés.
+
+Une limitation en mémoire protège les tentatives de connexion et d'inscription. Elle est locale au processus, réinitialisée au redémarrage, et ne constitue pas une protection complète contre les abus.
+
+### Contenus et confidentialité
+
+Les textes utilisateurs sont rendus comme du texte, et les liens de preuve sont limités à HTTP/HTTPS. Les liens d'intégration sont limités aux domaines HTTPS autorisés des fournisseurs ; ils ne donnent lieu à aucun téléchargement ou appel distant du serveur.
+
+Il n'existe pas de téléversement, d'analyse antivirus, d'environnement d'exécution de logiciel ou de bac à sable pour les projets des membres. Les essais de logiciels externes restent sous la responsabilité des participants : utiliser un environnement adapté, ne pas fournir d'identifiants personnels et ne pas suivre aveuglément une URL.
+
+La base stocke les messages, rapports et livraisons en clair au niveau applicatif. La confidentialité repose sur les autorisations de l'application et l'accès au fichier SQLite, pas sur un chiffrement de bout en bout. L'accès au serveur ou à une copie de la base donne accès à ces données. Les utilisateurs doivent aussi éviter de révéler des informations privées dans des publications ou avis publics.
+
+L'export JSON est réservé aux responsables du projet autorisé et contient les campagnes, missions et rapports de ce projet. Il ne transforme pas un projet privé en ressource publique. Un export peut toutefois contenir des informations sensibles saisies dans les rapports : le traiter comme un document confidentiel.
+
+### Argent et conformité
+
+Le registre local est une simulation métier, **pas** un séquestre, un portefeuille électronique, une comptabilité réglementaire ou un système de paiement. Il n'y a ni carte bancaire, ni paiement mobile, ni retrait, ni KYC, ni garantie de remboursement. Les exemples de prix ou de récompenses n'engagent aucun versement réel.
+
+Les en-têtes HTTP, validations et contraintes SQL présents constituent des protections initiales, pas un audit de sécurité ni une conformité juridique démontrée. Les tests exécutables du dépôt et le parcours manuel du README ne couvrent pas à eux seuls tous les navigateurs, les scénarios d'abus ou les exigences de production.
+
+## Avant une mise en production
+
+Travaux à concevoir et valider avant une ouverture publique, et impérativement avant tout argent réel :
+
+1. **Paiement et cadre légal** : sélectionner un PSP adapté à la marketplace et aux pays effectivement servis ; définir KYC/KYB, bénéficiaires, restrictions de pays et d'âge, obligations fiscales, facturation, contrats, licences, consentement, réclamations, remboursements et protection des données. Faire valider les parcours par des spécialistes compétents.
+2. **Fraude et abus** : limiter durablement les requêtes au-delà de l'authentification, protéger inscriptions et messagerie, détecter multi-comptes, collusion et avis artificiels, définir quotas, signalements, sanctions et procédures de recours.
+3. **Pièces jointes et logiciels** : avant d'ajouter un upload, prévoir stockage privé, limites, quarantaine, analyse, contrôle des types et liens d'accès temporaires. Toute exécution de logiciel non fiable nécessite une isolation dédiée ; ne jamais lancer des projets clients dans le processus API.
+4. **Cycle de vie des comptes** : vérification d'adresse, envoi d'emails fiable, récupération de mot de passe et procédures de suppression/export des données personnelles. Le changement de mot de passe et la révocation des sessions existent en V3 ; ils ne constituent pas une récupération de compte ni une authentification multifacteur.
+5. **Migrations et stockage** : étendre les migrations versionnées de la V2 pour les évolutions futures, tester sauvegardes et procédures de restauration à l'échelle réelle. Évaluer une migration vers PostgreSQL lorsque les besoins de concurrence, d'exploitation ou de volume le justifient, sans prétendre qu'elle existe aujourd'hui.
+6. **Traitement asynchrone avant paiement réel** : worker et outbox transactionnelle, clés d'idempotence, validation des signatures de webhooks, déduplication, reprises, rapprochement avec le PSP et journal financier auditable. Ne pas supposer qu'une transaction SQLite rend atomique un futur appel réseau.
+7. **Exploitation** : HTTPS, configuration sûre du reverse proxy, secrets et droits système, journaux structurés sans données sensibles, métriques, alertes, suivi des erreurs, sauvegardes cohérentes avec WAL, tests de restauration et politiques de rétention.
+8. **Validation continue** : compléter les tests d'autorisations et transitions, de concurrence, de confidentialité, de restauration et les parcours navigateur ; vérifier accessibilité et charge. Ne pas assimiler un build réussi à ces vérifications.
+
+Ces éléments sont un travail restant à réaliser, pas des fonctionnalités activées par un changement de variable d'environnement.
