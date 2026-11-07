@@ -1,0 +1,165 @@
+CREATE TABLE IF NOT EXISTS users (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL, title TEXT NOT NULL DEFAULT '',
+  bio TEXT NOT NULL DEFAULT '', skills TEXT NOT NULL DEFAULT '[]',
+  avatar_color TEXT NOT NULL DEFAULT '#6658e8',
+  role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('member','admin')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS organizations (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS organization_members (
+  organization_id TEXT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL DEFAULT 'member',
+  PRIMARY KEY (organization_id, user_id)
+);
+CREATE TABLE IF NOT EXISTS projects (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  organization_id TEXT REFERENCES organizations(id), title TEXT NOT NULL,
+  summary TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', category TEXT NOT NULL,
+  stage TEXT NOT NULL DEFAULT 'prototype', visibility TEXT NOT NULL DEFAULT 'public' CHECK(visibility IN ('public','private')),
+  repo_url TEXT NOT NULL DEFAULT '', demo_url TEXT NOT NULL DEFAULT '',
+  tags TEXT NOT NULL DEFAULT '[]', color TEXT NOT NULL DEFAULT '#6658e8',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS campaigns (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+  owner_id TEXT NOT NULL REFERENCES users(id), title TEXT NOT NULL, description TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'usability', reward_cents INTEGER NOT NULL CHECK(reward_cents > 0),
+  slots INTEGER NOT NULL CHECK(slots BETWEEN 1 AND 100),
+  requirements TEXT NOT NULL DEFAULT '', target_devices TEXT NOT NULL DEFAULT 'Web',
+  deadline TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS applications (
+  id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  tester_id TEXT NOT NULL REFERENCES users(id), motivation TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','accepted','rejected')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(campaign_id,tester_id)
+);
+CREATE TABLE IF NOT EXISTS missions (
+  id TEXT PRIMARY KEY, campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  tester_id TEXT NOT NULL REFERENCES users(id), application_id TEXT NOT NULL UNIQUE REFERENCES applications(id),
+  status TEXT NOT NULL DEFAULT 'assigned' CHECK(status IN ('assigned','in_progress','submitted','changes_requested','accepted','disputed','paid','cancelled')),
+  decision_note TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS test_reports (
+  id TEXT PRIMARY KEY, mission_id TEXT NOT NULL UNIQUE REFERENCES missions(id),
+  summary TEXT NOT NULL, steps TEXT NOT NULL, expected TEXT NOT NULL,
+  observed TEXT NOT NULL, evidence_url TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS groups (
+  id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id),
+  name TEXT NOT NULL, description TEXT NOT NULL, category TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#6658e8',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS group_members (
+  group_id TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(group_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS posts (
+  id TEXT PRIMARY KEY, author_id TEXT NOT NULL REFERENCES users(id),
+  group_id TEXT REFERENCES groups(id), body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS post_likes (
+  post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(post_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS comments (
+  id TEXT PRIMARY KEY, post_id TEXT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  author_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS listings (
+  id TEXT PRIMARY KEY, seller_id TEXT NOT NULL REFERENCES users(id),
+  project_id TEXT REFERENCES projects(id), title TEXT NOT NULL, description TEXT NOT NULL,
+  kind TEXT NOT NULL CHECK(kind IN ('software','component','prototype','service','concept')),
+  price_cents INTEGER NOT NULL CHECK(price_cents > 0),
+  license TEXT NOT NULL, deliverables TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','archived')),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS orders (
+  id TEXT PRIMARY KEY, listing_id TEXT NOT NULL REFERENCES listings(id),
+  buyer_id TEXT NOT NULL REFERENCES users(id), seller_id TEXT NOT NULL REFERENCES users(id),
+  price_cents INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'paid' CHECK(status IN ('paid','delivered','completed','disputed','refunded')),
+  delivery_text TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS transactions (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+  campaign_id TEXT REFERENCES campaigns(id), mission_id TEXT REFERENCES missions(id),
+  order_id TEXT REFERENCES orders(id), kind TEXT NOT NULL CHECK(kind IN ('funding','payout','purchase','sale','refund')),
+  amount_cents INTEGER NOT NULL CHECK(amount_cents > 0),
+  status TEXT NOT NULL DEFAULT 'completed' CHECK(status IN ('completed','pending','failed')),
+  mode TEXT NOT NULL DEFAULT 'demo' CHECK(mode = 'demo'),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS unique_mission_payout ON transactions(mission_id) WHERE kind = 'payout';
+CREATE UNIQUE INDEX IF NOT EXISTS unique_order_purchase ON transactions(order_id) WHERE kind = 'purchase';
+CREATE UNIQUE INDEX IF NOT EXISTS unique_order_sale ON transactions(order_id) WHERE kind = 'sale';
+CREATE TABLE IF NOT EXISTS reviews (
+  id TEXT PRIMARY KEY, author_id TEXT NOT NULL REFERENCES users(id),
+  subject_id TEXT NOT NULL REFERENCES users(id), mission_id TEXT NOT NULL REFERENCES missions(id),
+  rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(author_id,mission_id)
+);
+CREATE TABLE IF NOT EXISTS conversations (
+  id TEXT PRIMARY KEY, subject TEXT NOT NULL, created_by TEXT NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS conversation_members (
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  user_id TEXT NOT NULL REFERENCES users(id), PRIMARY KEY(conversation_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS messages (
+  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  sender_id TEXT NOT NULL REFERENCES users(id), body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS notifications (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id),
+  kind TEXT NOT NULL, title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+  link TEXT NOT NULL DEFAULT '/', read_at TEXT,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS moderation_reports (
+  id TEXT PRIMARY KEY, reporter_id TEXT NOT NULL REFERENCES users(id),
+  target_type TEXT NOT NULL CHECK(target_type IN ('project','post','listing','mission','order','user')),
+  target_id TEXT NOT NULL, reason TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','reviewing','resolved','dismissed')),
+  decision TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS audit_events (
+  id TEXT PRIMARY KEY, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL,
+  target_type TEXT NOT NULL, target_id TEXT NOT NULL, detail TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+);
+CREATE TABLE IF NOT EXISTS integrations (
+  id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id),
+  provider TEXT NOT NULL CHECK(provider IN ('github','gitlab','linear','figma')),
+  url TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(project_id,provider)
+);
+CREATE INDEX IF NOT EXISTS campaign_project ON campaigns(project_id);
+CREATE INDEX IF NOT EXISTS mission_tester ON missions(tester_id);
+CREATE INDEX IF NOT EXISTS notifications_user ON notifications(user_id,read_at);
+CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at);
