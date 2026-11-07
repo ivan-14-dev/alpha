@@ -113,3 +113,10 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE UNIQUE INDEX IF NOT EXISTS unique_mission_payout ON transactions(mission_id) WHERE kind = 'payout';
 CREATE UNIQUE INDEX IF NOT EXISTS unique_order_purchase ON transactions(order_id) WHERE kind = 'purchase';
 CREATE UNIQUE INDEX IF NOT EXISTS unique_order_sale ON transactions(order_id) WHERE kind = 'sale';
+CREATE TABLE IF NOT EXISTS reviews (
+  id TEXT PRIMARY KEY, author_id TEXT NOT NULL REFERENCES users(id),
+  subject_id TEXT NOT NULL REFERENCES users(id), mission_id TEXT NOT NULL REFERENCES missions(id),
+  rating INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5), body TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  UNIQUE(author_id,mission_id)
+);
