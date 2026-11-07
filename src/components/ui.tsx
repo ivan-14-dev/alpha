@@ -19,3 +19,4 @@ export function ErrorState({ message }: { message: string }) {
   return message ? <div className="alert alert-error" role="alert">{message}</div> : null;
 }
 export function Loading() { return <div className="loading" role="status"><LoaderCircle className="spin" size={22} /> Chargement…</div>; }
+export function DemoNotice() { return <div className="demo-notice"><span className="status-dot" /> Mode démonstration — aucun argent réel n’est débité ou versé.</div>; }
