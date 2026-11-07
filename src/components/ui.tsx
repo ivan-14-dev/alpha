@@ -12,3 +12,6 @@ export function Badge({ children, tone = 'neutral' }: { children: ReactNode; ton
 export function Avatar({ name, color = '#6658e8', size = 'normal' }: { name: string; color?: string; size?: 'small' | 'normal' | 'large' }) {
   return <span className={`avatar avatar-${size}`} style={{ backgroundColor: color }} aria-label={name}>{name.split(' ').map((word) => word[0]).slice(0, 2).join('').toUpperCase()}</span>;
 }
+export function EmptyState({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+  return <div className="empty-state"><div className="empty-symbol">✦</div><h3>{title}</h3>{description && <p>{description}</p>}{action}</div>;
+}
