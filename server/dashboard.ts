@@ -14,7 +14,7 @@ router.get('/', (req, res) => {
   const projects = all(`SELECT p.id,p.title,p.summary,p.category,p.stage,p.tags,p.color,u.name AS owner_name,
     (SELECT COUNT(*) FROM campaigns c WHERE c.project_id=p.id AND c.status='open' AND c.deadline>?) AS campaign_count
     FROM projects p JOIN users u ON u.id=p.owner_id WHERE p.visibility='public' ORDER BY p.created_at DESC LIMIT 3`, new Date().toISOString());
-  const campaigns = all(`SELECT c.id,c.title,c.kind,c.reward_cents,c.slots,c.target_devices,c.deadline,
+  const campaigns = all(`SELECT c.id,c.title,c.kind,c.reward_cents,c.payment_mode,c.slots,c.target_devices,c.deadline,
     p.title AS project_title,p.color,
     (SELECT COUNT(*) FROM missions m WHERE m.campaign_id=c.id AND m.status!='cancelled') AS assigned
     FROM campaigns c JOIN projects p ON p.id=c.project_id WHERE p.visibility='public' AND c.status='open' AND c.deadline>?
