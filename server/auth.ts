@@ -1,94 +1,91 @@
-import { createHash, randomBytes, scrypt, timingSafeEqual } from 'node:crypto';
-import { promisify } from 'node:util';
-import { Router, type Request, type Response, type NextFunction } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { all, one, run, transaction } from './db.js';
 import { audit, HttpError, id, param, requireUser, type User } from './core.js';
+import { accountRestriction, recordSignal } from './platform/guards.js';
+import { pendingRequiredDocuments, recordLegalAcceptance } from './platform/legal.js';
+import { hit, rateLimit, resetHits } from './platform/rateLimit.js';
+import { authAdminRouter } from './accounts/admin.js';
+import { queuePasswordChangedEmail } from './accounts/emails.js';
+import { legalRouter } from './accounts/legal.js';
+import { createMfaChallenge, mfaRouter } from './accounts/mfa.js';
+import { enabledOAuthProviders, providerDefinitions } from './accounts/oauth.js';
+import { oauthRouter } from './accounts/oauthRoutes.js';
+import { checkPassword, hashPassword, passwordSchema } from './accounts/passwords.js';
+import { issueEmailVerification, recoveryRouter } from './accounts/recovery.js';
+import { clearSessionCookie, cookieToken, digest, insertSession, requireLiveSession, setSessionCookie } from './accounts/session.js';
+import { accountFlags, adminMfaMissing, authPolicy, enrichUser, linkedIdentities, mfaStatus } from './accounts/status.js';
+import './accounts/privacy.js';
 
-const derive = promisify(scrypt);
-const cookieName = 'alpha_session';
-const sessionDays = 7;
+export { hashPassword };
+
 const publicFields = 'u.id,u.name,u.email,u.title,u.bio,u.skills,u.avatar_color,u.role,u.created_at';
-const digest = (token: string) => createHash('sha256').update(token).digest('hex');
-const cookieToken = (req: Request) => {
-  const token = req.headers.cookie?.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${cookieName}=`))?.slice(cookieName.length + 1);
-  return token && /^[a-f0-9]{64}$/.test(token) ? token : undefined;
-};
+const loadUser = (userId: string) => one<User>(`SELECT ${publicFields} FROM users u WHERE u.id=?`, userId)!;
 
-export async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString('hex');
-  const key = await derive(password, salt, 64) as Buffer;
-  return `${salt}:${key.toString('hex')}`;
-}
-
-async function checkPassword(password: string, stored: string): Promise<boolean> {
-  const [salt, value] = stored.split(':');
-  const actual = await derive(password, salt, 64) as Buffer;
-  const expected = Buffer.from(value, 'hex');
-  return actual.length === expected.length && timingSafeEqual(actual, expected);
-}
-
+/**
+ * Resolves the session cookie. Users under a `login` restriction are treated as signed out, and admins
+ * lose their admin rights while the "MFA required for admins" policy is on and they have no MFA.
+ */
 export function attachUser(req: Request, _res: Response, next: NextFunction) {
   const token = cookieToken(req);
-  if (token) req.user = one<User>(`SELECT ${publicFields} FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`,
-    digest(token), new Date().toISOString());
-  next();
-}
-
-function insertSession(req: Request, userId: string) {
-  const token = randomBytes(32).toString('hex');
-  const old = cookieToken(req);
-  const createdAt = new Date();
-  if (old) run('DELETE FROM sessions WHERE token_hash=?', digest(old));
-  run('DELETE FROM sessions WHERE expires_at<=?', createdAt.toISOString());
-  run('INSERT INTO sessions(token_hash,user_id,expires_at,public_id,created_at) VALUES (?,?,?,?,?)',
-    digest(token), userId, new Date(createdAt.getTime() + sessionDays * 86400000).toISOString(),
-    randomBytes(16).toString('hex'), createdAt.toISOString());
-  return token;
-}
-
-function setSessionCookie(res: Response, token: string) {
-  res.setHeader('Set-Cookie', `${cookieName}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${sessionDays * 86400}${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
-}
-
-function requireLiveSession(req: Request) {
-  const user = requireUser(req);
-  const token = cookieToken(req);
-  const tokenHash = token ? digest(token) : '';
-  if (!one('SELECT 1 FROM sessions WHERE user_id=? AND token_hash=? AND expires_at>?',
-    user.id, tokenHash, new Date().toISOString())) {
-    throw new HttpError(401, 'Votre session a expire ou a ete revoquee. Reconnectez-vous.');
+  if (token) {
+    const user = one<User>(`SELECT ${publicFields} FROM sessions s JOIN users u ON u.id=s.user_id WHERE s.token_hash=? AND s.expires_at>?`,
+      digest(token), new Date().toISOString());
+    if (user && !accountRestriction(user.id, 'login')) {
+      if (user.role === 'admin' && adminMfaMissing(user.id, user.role)) user.role = 'member';
+      req.user = user;
+    }
   }
-  return { user, tokenHash };
-}
-
-const attempts = new Map<string, { count: number; reset: number }>();
-function rateLimit(req: Request, _res: Response, next: NextFunction) {
-  const current = Date.now();
-  for (const [key, value] of attempts) if (value.reset <= current) attempts.delete(key);
-  const key = `${req.ip}:${req.path}`;
-  const entry = attempts.get(key) ?? { count: 0, reset: current + 15 * 60000 };
-  entry.count += 1;
-  attempts.set(key, entry);
-  if (entry.count > 30) throw new HttpError(429, 'Trop de tentatives. Reessayez dans 15 minutes.');
   next();
 }
+
+const windowMs = 15 * 60000;
+const limitMessage = 'Trop de tentatives. Réessayez dans 15 minutes.';
+const passwordLimiter = rateLimit({ name: 'auth.password', limit: 30, windowMs, message: limitMessage });
+const registerLimiter = rateLimit({ name: 'auth.register', limit: 30, windowMs, message: limitMessage });
+const loginLimiter = rateLimit({ name: 'auth.login', limit: 30, windowMs, message: limitMessage });
+const perAccountLoginLimit = 20;
 
 const credentials = z.object({
   email: z.string().trim().email().max(254).transform((value) => value.toLowerCase()),
-  password: z.string().min(10).max(128),
+  password: passwordSchema,
 });
+const registerInput = credentials.extend({ name: z.string().trim().min(2).max(80), accept_terms: z.boolean().optional() });
 const sessionPage = z.object({
   limit: z.string().regex(/^[1-9]\d*$/).transform(Number).pipe(z.number().int().min(1).max(50)).default('20'),
   offset: z.string().regex(/^(0|[1-9]\d*)$/).transform(Number).pipe(z.number().int().min(0).max(1000000)).default('0'),
 }).strict();
 const passwordChange = z.object({
   current_password: z.string().min(1).max(128),
-  new_password: z.string().min(10).max(128),
+  new_password: passwordSchema,
 }).strict();
 
 export const authRouter = Router();
-authRouter.get('/me', (req, res) => res.json({ user: req.user ?? null }));
+authRouter.get('/me', (req, res) => res.json({ user: req.user ? enrichUser(req.user) : null }));
+
+/** Security status of the signed-in account (settings page). Never contains secrets. */
+authRouter.get('/account', (req, res) => {
+  const user = requireUser(req);
+  const flags = accountFlags(user.id);
+  const identities = linkedIdentities(user.id);
+  const storedRole = one<{ role: string }>('SELECT role FROM users WHERE id=?', user.id)!.role;
+  res.json({
+    email: user.email,
+    email_verified: flags.email_verified,
+    email_verified_at: flags.email_verified_at,
+    has_password: flags.has_password,
+    mfa: mfaStatus(user.id),
+    identities,
+    oauth_providers: enabledOAuthProviders().map((provider) => ({
+      id: provider, name: providerDefinitions[provider].name, linked: identities.some((identity) => identity.provider === provider),
+    })),
+    can_unlink: flags.has_password || identities.length > 1,
+    pending_legal: pendingRequiredDocuments(user.id),
+    admin_mfa_required: adminMfaMissing(user.id, storedRole),
+    policy: authPolicy(),
+  });
+});
+
 authRouter.get('/sessions', (req, res) => {
   requireUser(req);
   const { limit, offset } = sessionPage.parse(req.query);
@@ -113,7 +110,7 @@ authRouter.delete('/sessions/:id', (req, res) => {
       'SELECT token_hash=? AS current FROM sessions WHERE public_id=? AND user_id=? AND expires_at>?',
       tokenHash, sessionId, user.id, new Date().toISOString());
     if (!session) throw new HttpError(404, 'Session introuvable.');
-    if (session.current) throw new HttpError(409, 'Utilisez la deconnexion pour fermer votre session actuelle.');
+    if (session.current) throw new HttpError(409, 'Utilisez la déconnexion pour fermer votre session actuelle.');
     run('DELETE FROM sessions WHERE public_id=? AND user_id=?', sessionId, user.id);
     audit(user.id, 'auth.session_revoked', 'user', user.id);
   });
@@ -128,7 +125,7 @@ authRouter.post('/sessions/revoke-others', (req, res) => {
   });
   res.json({ ok: true, revoked });
 });
-authRouter.post('/password', rateLimit, async (req, res) => {
+authRouter.post('/password', passwordLimiter, async (req, res) => {
   const { user, account } = transaction(() => {
     const { user } = requireLiveSession(req);
     const account = one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id=?', user.id)!;
@@ -143,48 +140,82 @@ authRouter.post('/password', rateLimit, async (req, res) => {
     requireLiveSession(req);
     const latest = one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id=?', user.id);
     if (latest?.password_hash !== account.password_hash) {
-      throw new HttpError(409, 'Le mot de passe a change entre-temps. Actualisez puis reessayez.');
+      throw new HttpError(409, 'Le mot de passe a changé entre-temps. Actualisez puis réessayez.');
     }
     if (!valid) throw new HttpError(400, 'Le mot de passe actuel est incorrect.');
-    if (!changed) throw new HttpError(400, 'Choisissez un mot de passe different du mot de passe actuel.');
+    if (!changed) throw new HttpError(400, 'Choisissez un mot de passe différent du mot de passe actuel.');
     run('UPDATE users SET password_hash=? WHERE id=?', passwordHash!, user.id);
     run('DELETE FROM sessions WHERE user_id=?', user.id);
+    run('UPDATE password_reset_tokens SET used_at=? WHERE user_id=? AND used_at IS NULL', new Date().toISOString(), user.id);
+    run('DELETE FROM mfa_challenges WHERE user_id=?', user.id);
     const sessionToken = insertSession(req, user.id);
+    queuePasswordChangedEmail(user);
     audit(user.id, 'auth.password_changed', 'user', user.id);
     return sessionToken;
   });
   setSessionCookie(res, token);
   res.json({ ok: true });
 });
-authRouter.post('/register', rateLimit, async (req, res) => {
-  const input = credentials.extend({ name: z.string().trim().min(2).max(80) }).parse(req.body);
-  if (one('SELECT id FROM users WHERE email=?', input.email)) throw new HttpError(409, 'Cette adresse est deja utilisee.');
+authRouter.post('/register', registerLimiter, async (req, res) => {
+  const input = registerInput.parse(req.body);
+  if (one('SELECT id FROM users WHERE email=?', input.email)) throw new HttpError(409, 'Cette adresse est déjà utilisée.');
   const passwordHash = await hashPassword(input.password);
   const userId = id();
   const token = transaction(() => {
-    if (one('SELECT id FROM users WHERE email=?', input.email)) throw new HttpError(409, 'Cette adresse est deja utilisee.');
+    if (one('SELECT id FROM users WHERE email=?', input.email)) throw new HttpError(409, 'Cette adresse est déjà utilisée.');
     run('INSERT INTO users (id,name,email,password_hash) VALUES (?,?,?,?)', userId, input.name, input.email, passwordHash);
-    return insertSession(req, userId);
+    if (input.accept_terms === true) recordLegalAcceptance(userId, ['terms', 'privacy']);
+    // Verification is offered, never required: the account is usable immediately.
+    issueEmailVerification({ id: userId, email: input.email, name: input.name });
+    const sessionToken = insertSession(req, userId);
+    recordSignal(req, userId, 'register', { method: 'password' });
+    return sessionToken;
   });
   setSessionCookie(res, token);
-  res.status(201).json({ user: one<User>(`SELECT ${publicFields} FROM users u WHERE u.id=?`, userId) });
+  res.status(201).json({ user: enrichUser(loadUser(userId)) });
 });
-authRouter.post('/login', rateLimit, async (req, res) => {
+authRouter.post('/login', loginLimiter, async (req, res) => {
   const input = credentials.parse(req.body);
+  // Per-account bucket against distributed guessing; a successful sign-in resets it.
+  const accountKey = `auth.login-account:${input.email}`;
+  if (!hit(accountKey, perAccountLoginLimit, windowMs).allowed) {
+    throw new HttpError(429, 'Trop de tentatives pour ce compte. Réessayez dans 15 minutes ou réinitialisez votre mot de passe.');
+  }
   const account = one<{ id: string; password_hash: string }>('SELECT id,password_hash FROM users WHERE email=?', input.email);
-  const valid = await checkPassword(input.password, account?.password_hash ?? `${'0'.repeat(32)}:${'0'.repeat(128)}`);
-  if (!account || !valid) throw new HttpError(401, 'Adresse email ou mot de passe incorrect.');
-  const token = transaction(() => {
+  const valid = await checkPassword(input.password, account?.password_hash);
+  if (!account || !valid) {
+    recordSignal(req, account?.id ?? null, 'login_failed', {});
+    throw new HttpError(401, 'Adresse email ou mot de passe incorrect.');
+  }
+  const restriction = accountRestriction(account.id, 'login');
+  if (restriction) throw new HttpError(403, restriction.message);
+  const result = transaction(() => {
     const latest = one<{ password_hash: string }>('SELECT password_hash FROM users WHERE id=?', account.id);
     if (latest?.password_hash !== account.password_hash) throw new HttpError(401, 'Adresse email ou mot de passe incorrect.');
-    return insertSession(req, account.id);
+    if (one('SELECT 1 FROM mfa_totp WHERE user_id=? AND enabled_at IS NOT NULL', account.id)) {
+      return { challenge: createMfaChallenge(account.id, 'password') };
+    }
+    const sessionToken = insertSession(req, account.id);
+    recordSignal(req, account.id, 'login', {});
+    return { token: sessionToken };
   });
-  setSessionCookie(res, token);
-  res.json({ user: one<User>(`SELECT ${publicFields} FROM users u WHERE u.id=?`, account.id) });
+  resetHits(accountKey);
+  if (result.challenge) {
+    res.json({ mfa_required: true, challenge: result.challenge });
+    return;
+  }
+  setSessionCookie(res, result.token!);
+  res.json({ user: enrichUser(loadUser(account.id)) });
 });
 authRouter.post('/logout', (req, res) => {
   const token = cookieToken(req);
   if (token) run('DELETE FROM sessions WHERE token_hash=?', digest(token));
-  res.setHeader('Set-Cookie', `${cookieName}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${process.env.NODE_ENV === 'production' ? '; Secure' : ''}`);
+  clearSessionCookie(res);
   res.json({ ok: true });
 });
+
+authRouter.use(recoveryRouter);
+authRouter.use('/mfa', mfaRouter);
+authRouter.use('/oauth', oauthRouter);
+authRouter.use('/legal', legalRouter);
+authRouter.use('/admin', authAdminRouter);
