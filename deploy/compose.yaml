@@ -116,7 +116,7 @@ services:
     logging: *logging
 
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     profiles: [postgres]
     restart: unless-stopped
     # Not published on the host: reachable from the app container as postgres:5432.
