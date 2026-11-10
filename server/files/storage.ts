@@ -125,10 +125,14 @@ export async function writeEncryptedTemp(source: Readable, fileId: string, maxBy
   const temp = tempPath();
   const inspector = new PlaintextInspector(maxBytes, onLimit);
   const encryptor = new EncryptStream(fileId);
+  const sink = createWriteStream(temp, { flags: 'wx', mode: 0o600 });
   try {
-    await pipeline(source, inspector, encryptor, createWriteStream(temp, { flags: 'wx', mode: 0o600 }));
+    await pipeline(source, inspector, encryptor, sink);
     return { ...inspector.stats(), temp, fingerprint: encryptor.fingerprint };
   } catch (error) {
+    // The temp file is opened asynchronously: wait for the sink to close so the removal cannot race its creation.
+    sink.destroy();
+    if (!sink.closed) await new Promise<void>((resolve) => sink.once('close', () => resolve()));
     removeQuietly(temp);
     throw error;
   }
