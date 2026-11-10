@@ -1,0 +1,66 @@
+# Alpha — reverse proxy with automatic HTTPS (Let's Encrypt / ZeroSSL).
+# ALPHA_DOMAIN and ACME_EMAIL come from deploy/.env (see compose.yaml).
+{
+	email {$ACME_EMAIL}
+	# Structured access logs on stdout (docker logs alpha-caddy-1).
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Optional: redirect www to the apex domain (needs a DNS record for www too).
+# www.{$ALPHA_DOMAIN} {
+# 	redir https://{$ALPHA_DOMAIN}{uri} permanent
+# }
+
+{$ALPHA_DOMAIN} {
+	# Text responses only: never compress realtime streams (text/event-stream) or already compressed files.
+	encode {
+		zstd
+		gzip 6
+		minimum_length 1024
+		match {
+			header Content-Type text/html*
+			header Content-Type text/css*
+			header Content-Type text/plain*
+			header Content-Type application/json*
+			header Content-Type application/javascript*
+			header Content-Type text/javascript*
+			header Content-Type application/manifest+json*
+			header Content-Type image/svg+xml*
+		}
+	}
+
+	# The app already sends CSP, X-Frame-Options, X-Content-Type-Options and Referrer-Policy.
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(self), usb=()"
+		?Cross-Origin-Opener-Policy "same-origin"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+		-X-Powered-By
+	}
+
+	# Prometheus metrics: private networks only (the endpoint also requires the METRICS_TOKEN bearer).
+	@metrics_public {
+		path /api/system/metrics
+		not remote_ip private_ranges
+	}
+	respond @metrics_public 404
+
+	# Largest upload accepted by the files module is 200 MB (campaign builds).
+	request_body {
+		max_size 210MB
+	}
+
+	reverse_proxy app:3001 {
+		# Realtime notifications use Server-Sent Events: forward each event immediately.
+		flush_interval -1
+		health_uri /api/health
+		health_interval 15s
+	}
+
+	log
+}

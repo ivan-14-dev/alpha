@@ -1,0 +1,142 @@
+# Alpha — production stack (single node).
+#   cd deploy && cp .env.example .env && $EDITOR .env      (chmod 600 .env)
+#   docker compose up -d --build                           # app + caddy + clamav
+#   docker compose --profile dev up -d                     # + mailpit (SMTP catcher, never in production)
+#   docker compose --profile postgres up -d postgres       # + PostgreSQL 16 for `npm run db:export:postgres`
+# Full guide: docs/deployment.md — runbooks: docs/operations.md
+#
+# The app container NEVER gets the host Docker socket. The sandbox module talks to a REMOTE, dedicated
+# Docker host: ALPHA_SANDBOX_DOCKER_HOST=tcp://sandbox.internal:2376 + ALPHA_SANDBOX_DOCKER_TLS_VERIFY=1
+# + client certificates mounted below (see docs/deployment.md, "Bac à sable").
+
+name: alpha
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+services:
+  app:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        VCS_REF: ${ALPHA_VCS_REF:-unknown}
+    image: ${ALPHA_IMAGE:-alpha-platform:latest}
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: true
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "3001"
+      DATABASE_PATH: /data/alpha.sqlite
+      FILES_DIR: /data/files
+      BACKUP_DIR: /data/backups
+      # Exactly one proxy (Caddy) in front: rate limits and audit logs see the real client address.
+      TRUST_PROXY: "1"
+      CLAMAV_HOST: ${CLAMAV_HOST:-clamav}
+      CLAMAV_PORT: ${CLAMAV_PORT:-3310}
+    volumes:
+      - alpha-data:/data
+      # Remote sandbox Docker host over TLS: put ca.pem, cert.pem, key.pem in deploy/sandbox-docker-certs/,
+      # uncomment, and set ALPHA_SANDBOX_DOCKER_CERT_PATH=/run/secrets/sandbox-docker in .env.
+      # - ./sandbox-docker-certs:/run/secrets/sandbox-docker:ro
+    expose:
+      - "3001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # On SIGTERM the app closes realtime streams, lets in-flight requests finish (max 8 s) and checkpoints SQLite.
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/api/system/ready').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      start_period: 40s
+      retries: 3
+    depends_on:
+      clamav:
+        condition: service_started
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ALPHA_DOMAIN: ${ALPHA_DOMAIN:?définissez ALPHA_DOMAIN dans deploy/.env}
+      ACME_EMAIL: ${ACME_EMAIL:?définissez ACME_EMAIL dans deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      app:
+        condition: service_healthy
+    logging: *logging
+
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    # Signature database persisted so restarts do not re-download it. Plan ~3 GB RAM (peak during reloads).
+    volumes:
+      - clamav-db:/var/lib/clamav
+      # Raises the stream/file size limits to cover 200 MB campaign builds (default 100 MB).
+      - ./clamav/clamd.conf:/etc/clamav/clamd.conf:ro
+    environment:
+      CLAMAV_NO_MILTERD: "true"
+    healthcheck:
+      test: ["CMD", "clamdcheck.sh"]
+      interval: 60s
+      timeout: 10s
+      start_period: 300s
+      retries: 3
+    logging: *logging
+
+  mailpit:
+    image: axllent/mailpit:v1.33
+    profiles: [dev]
+    restart: unless-stopped
+    # Web UI on http://127.0.0.1:8025 ; set SMTP_URL=smtp://mailpit:1025 in .env.
+    ports:
+      - "127.0.0.1:8025:8025"
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "true"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "true"
+    logging: *logging
+
+  postgres:
+    image: postgres:16-alpine
+    profiles: [postgres]
+    restart: unless-stopped
+    # Not published on the host: reachable from the app container as postgres:5432.
+    # POSTGRES_PASSWORD must be set in .env (the image refuses to start without it).
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-alpha}
+      POSTGRES_USER: ${POSTGRES_USER:-alpha}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *logging
+
+volumes:
+  alpha-data:
+  caddy-data:
+  caddy-config:
+  clamav-db:
+  postgres-data:
