@@ -1,0 +1,20 @@
+/* Ops admin sections (OverviewAdmin, SystemAdmin). OWNER: ops module. */
+.ops-stats{grid-template-columns:repeat(4,minmax(0,1fr));margin:0}
+.ops-columns{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px;align-items:start}
+.ops-kv{display:grid;grid-template-columns:auto 1fr;gap:8px 16px;margin:0;font-size:12px}
+.ops-kv dt{color:#7d608c}
+.ops-kv dd{margin:0;color:#4b3f57;overflow-wrap:anywhere}
+.ops-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;overflow-wrap:anywhere}
+.ops-check{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;padding:12px 0;border-bottom:1px solid var(--line)}
+.ops-check:last-child{border:0}
+.ops-check p{grid-column:2;font-size:12px;color:#71667c;line-height:1.5}
+.ops-check-icon{grid-row:span 2;margin-top:2px}
+.ops-check-icon.ok{color:#5f9a7d}.ops-check-icon.warning{color:#bc8a4f}.ops-check-icon.error{color:#c0505a}.ops-check-icon.info{color:#7d8fb8}
+.ops-error-text{color:#b5535d;font-size:11px;max-width:320px;overflow-wrap:anywhere}
+.ops-inline-form{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end}
+.ops-inline-form .field{min-width:150px}
+.ops-inline-form input[type=number]{width:110px}
+.ops-checkbox{display:flex;align-items:center;gap:8px;font-size:12px;color:#5d4f69;font-weight:500}
+.ops-section-title{display:flex;align-items:center;gap:8px}
+@media (max-width:1100px){.ops-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.ops-columns{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:560px){.ops-stats{grid-template-columns:minmax(0,1fr)}}
