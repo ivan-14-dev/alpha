@@ -1,0 +1,110 @@
+# Alpha — Prometheus alerting rules. Runbooks: docs/operations.md (anchors in the `runbook` annotations).
+# promtool check rules deploy/prometheus/alerts.yml
+groups:
+  - name: alpha
+    rules:
+      - alert: AlphaDown
+        expr: up{job="alpha"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations:
+          summary: "Alpha ne répond plus aux collectes Prometheus"
+          runbook: "docs/operations.md#application-indisponible"
+
+      - alert: AlphaSchemaBehind
+        expr: alpha_schema_version < alpha_schema_latest_version
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "Schéma de base en retard sur le code (migration non appliquée)"
+          runbook: "docs/operations.md#application-indisponible"
+
+      - alert: AlphaHigh5xxRate
+        expr: |
+          sum(rate(alpha_http_requests_total{status=~"5.."}[5m]))
+            / clamp_min(sum(rate(alpha_http_requests_total[5m])), 1e-9) > 0.05
+          and sum(rate(alpha_http_requests_total[5m])) > 0.1
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "Plus de 5 % de réponses 5xx depuis 10 min"
+          runbook: "docs/operations.md#erreurs-5xx"
+
+      - alert: AlphaSlowRequests
+        # Realtime SSE streams are long-lived by design and excluded.
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(alpha_http_request_duration_seconds_bucket{route!="/api/realtime/stream"}[10m]))) > 2
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "p95 des requêtes au-dessus de 2 s"
+          runbook: "docs/operations.md#lenteurs"
+
+      - alert: AlphaJobFailing
+        expr: alpha_job_last_run_failed == 1
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "La tâche {{ $labels.job }} échoue"
+          runbook: "docs/operations.md#tâche-planifiée-en-échec"
+
+      - alert: AlphaBackupStale
+        # 0 when no backup exists at all: fires too. Daily backups + 2 h margin.
+        expr: time() - alpha_backup_last_success_timestamp_seconds > 26 * 3600
+        for: 15m
+        labels: { severity: critical }
+        annotations:
+          summary: "Aucune sauvegarde complète depuis plus de 26 h"
+          runbook: "docs/operations.md#sauvegarde-manquante"
+
+      - alert: AlphaEmailOutboxStuck
+        expr: alpha_email_outbox_oldest_queued_age_seconds > 1800
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "E-mails en file depuis plus de 30 min"
+          runbook: "docs/operations.md#e-mails-non-envoyés"
+
+      - alert: AlphaEmailFailures
+        expr: delta(alpha_email_outbox{status="failed"}[1h]) > 5
+        labels: { severity: warning }
+        annotations:
+          summary: "Plus de 5 e-mails définitivement en échec en 1 h"
+          runbook: "docs/operations.md#e-mails-non-envoyés"
+
+      - alert: AlphaRestarting
+        expr: changes(process_start_time_seconds{job="alpha"}[1h]) > 3
+        labels: { severity: warning }
+        annotations:
+          summary: "Alpha a redémarré plus de 3 fois en 1 h"
+          runbook: "docs/operations.md#application-indisponible"
+
+      - alert: AlphaMemoryHigh
+        expr: process_resident_memory_bytes{job="alpha"} > 1.5e9
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Mémoire résidente au-dessus de 1,5 Go"
+          runbook: "docs/operations.md#lenteurs"
+
+      - alert: AlphaDatabaseGrowing
+        # WAL normally checkpoints well below this; a large WAL means a long-running reader or a stuck checkpoint.
+        expr: alpha_db_wal_size_bytes > 512 * 1024 * 1024
+        for: 30m
+        labels: { severity: warning }
+        annotations:
+          summary: "Fichier WAL SQLite au-dessus de 512 Mo"
+          runbook: "docs/operations.md#disque-plein"
+
+  - name: alpha-host
+    rules:
+      # Requires node_exporter on the host (mountpoint of /var/lib/docker).
+      - alert: AlphaDiskAlmostFull
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+            / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"} < 0.15
+        for: 15m
+        labels: { severity: warning }
+        annotations:
+          summary: "Moins de 15 % d’espace disque libre"
+          runbook: "docs/operations.md#disque-plein"
