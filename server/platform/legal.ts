@@ -3,7 +3,9 @@ import { id } from '../core.js';
 
 /**
  * Versioned legal documents. Bumping a version requires users to accept again (enforced by the privacy module).
- * Texts live in src/pages/LegalPage.tsx and are TEMPLATES that must be validated by a lawyer before launch.
+ * Texts live in docs/legal/<file>.md (front matter "version" must match; slug → file map in server/privacy/legal.ts)
+ * and are TEMPLATES that must be validated by a lawyer before launch. `legal_notice` (mentions légales) is an
+ * information-only document served by the privacy module and never requires acceptance.
  */
 export const legalDocuments = {
   terms: { version: '2026-11-v4', title: 'Conditions générales d’utilisation', required: true },
