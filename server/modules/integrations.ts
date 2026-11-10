@@ -2,7 +2,19 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { audit, canManageProject, HttpError, id, now, param, requireUser, safeUrl } from '../core.js';
 import { all, one, run, transaction } from '../db.js';
+import { adminRouter } from '../integrations/admin.js';
+import { endpointsRouter } from '../integrations/endpoints.js';
+import { inboundRouter } from '../integrations/inbound.js';
+import { connectionsRouter, oauthRouter } from '../integrations/oauth.js';
+import '../integrations/outgoing.js';
+import '../integrations/privacy.js';
+import { sourcesRouter } from '../integrations/sources.js';
 
+/**
+ * V3: saved provider links + JSON export (unchanged).
+ * V4: OAuth connections, project sources with signed inbound webhooks (raw body, no session, no CSRF header),
+ * signed outgoing webhooks (delivery job `integrations.deliver`) and the admin section. See docs/v4/integrations.md.
+ */
 const router = Router();
 const projectId = z.string().min(1).max(128).regex(/^[a-zA-Z0-9_-]+$/);
 const providerSchema = z.enum(['github', 'gitlab', 'linear', 'figma']);
@@ -43,11 +55,21 @@ function managedProject(userId: string, value: unknown): Project {
   return project;
 }
 
+// Provider callbacks: authenticated by signature/token/passcode, never by session.
+router.use('/webhooks', inboundRouter);
+// OAuth start/callback: the callback redirects (relative path) even when the session is missing.
+router.use('/oauth', oauthRouter);
+
 router.use((req, res, next) => {
   requireUser(req);
   res.set('Cache-Control', 'private, no-store');
   next();
 });
+
+router.use('/admin', adminRouter);
+router.use(connectionsRouter);
+router.use(sourcesRouter);
+router.use(endpointsRouter);
 
 router.get('/projects', (req, res) => {
   const user = requireUser(req);
