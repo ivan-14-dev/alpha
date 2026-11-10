@@ -1,0 +1,78 @@
+/* Payments core: checkout dialog, checkout pages, payments page (real modes), admin payments console. OWNER: payments core. */
+.pay-banner{display:flex;align-items:flex-start;gap:10px;border-radius:10px;padding:13px 16px;font-size:12px;line-height:1.6;border:1px solid}
+.pay-banner svg{flex:none;margin-top:2px}
+.pay-banner strong{display:block;font-weight:650}
+.pay-banner a{color:inherit;text-decoration:underline;font-weight:600}
+.pay-banner-demo{background:#fdf8ee;border-color:#f0e5cd;color:#7d5f2c}
+.pay-banner-sandbox{background:#eef6ff;border-color:#cfe2f8;color:#2f5680}
+.pay-banner-live{background:#eefaf3;border-color:#cdeedb;color:#24613f}
+.pay-banner-warning{background:#fff6ec;border-color:#f5d9b8;color:#8a5419}
+.pay-banner-danger{background:#fff1f1;border-color:#f3cdcd;color:#8f2f2f}
+.pay-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}
+.pay-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45;overflow-wrap:anywhere}
+.pay-amount{font-variant-numeric:tabular-nums;white-space:nowrap}
+.pay-amount-in{color:#1f7a4a;font-weight:600}
+.pay-amount-out{color:#a03a3a;font-weight:600}
+
+/* Checkout dialog */
+.pay-options{display:grid;gap:10px;border:0;padding:0;margin:0}
+.pay-options legend{font-size:11px;font-weight:600;color:#81708e;margin-bottom:8px;padding:0}
+.pay-option{display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:12px;padding:12px 14px;background:#fff;cursor:pointer;transition:border-color .15s,box-shadow .15s}
+.pay-option:hover{border-color:#cfc6f6}
+.pay-option:has(input:checked){border-color:var(--purple);box-shadow:0 0 0 3px var(--purple-light)}
+.pay-option:has(input:focus-visible){outline:3px solid #a798f2;outline-offset:2px}
+.pay-option input{accent-color:var(--purple);margin:0}
+.pay-option-body{display:flex;flex-direction:column;gap:2px;min-width:0}
+.pay-option-body strong{font-size:13px}
+.pay-chips{display:flex;flex-wrap:wrap;gap:6px}
+.pay-chip{font-size:10px;border-radius:999px;background:#f4f2fb;color:#6b5f8f;padding:2px 8px}
+.pay-total{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#faf9fd;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.pay-total strong{font-size:20px;font-variant-numeric:tabular-nums}
+.pay-instructions{white-space:pre-wrap;background:#f6f8ff;border:1px solid #dfe5f7;border-radius:12px;padding:14px 16px;font-size:13px;line-height:1.6}
+
+/* Checkout pages */
+.pay-checkout{max-width:620px;margin:0 auto;display:flex;flex-direction:column;gap:18px;padding-bottom:40px}
+.pay-result{display:flex;flex-direction:column;align-items:center;text-align:center;gap:12px;padding:30px 24px}
+.pay-result-icon{width:62px;height:62px;border-radius:50%;display:grid;place-items:center}
+.pay-result-success .pay-result-icon{background:#e7f7ee;color:#1f7a4a}
+.pay-result-failure .pay-result-icon{background:#fdeeee;color:#a03a3a}
+.pay-result-pending .pay-result-icon{background:#eef2ff;color:#4b5bc4}
+.pay-result-review .pay-result-icon{background:#fff4e6;color:#8a5419}
+.pay-result h2{font-size:22px}
+.pay-summary{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;font-size:12px;width:100%;text-align:left}
+.pay-summary dt{color:var(--muted)}
+.pay-summary dd{margin:0;font-weight:600;overflow-wrap:anywhere;text-align:right}
+.pay-simulator-actions{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
+/* Admin console */
+.pay-admin{display:flex;flex-direction:column;gap:20px}
+.pay-admin-section{display:flex;flex-direction:column;gap:14px}
+.pay-mode-switch{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.pay-mode-card{display:flex;flex-direction:column;gap:6px;text-align:left;border:1px solid var(--line);border-radius:12px;padding:14px;background:#fff;cursor:pointer}
+.pay-mode-card strong{font-size:14px}
+.pay-mode-card.is-active{border-color:var(--purple);box-shadow:0 0 0 3px var(--purple-light)}
+.pay-mode-card.is-live.is-active{border-color:#1f7a4a;box-shadow:0 0 0 3px #dff3e7}
+.pay-provider-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:16px}
+.pay-provider-card{display:flex;flex-direction:column;gap:12px}
+.pay-provider-card .tabs{margin-bottom:4px}
+.pay-secret{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.pay-secret code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#f4f2fb;border-radius:6px;padding:2px 6px}
+.pay-copy{display:flex;gap:8px;align-items:center}
+.pay-copy input{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+.pay-problems{margin:0;padding-left:18px;font-size:12px;line-height:1.6}
+.pay-legal{font-size:12px;line-height:1.65}
+.pay-legal ul{margin:6px 0 0;padding-left:18px}
+.pay-filters{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.pay-filters .field{min-width:150px}
+.pay-legs{display:grid;gap:8px}
+.pay-leg{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;gap:8px;align-items:end}
+.pay-table-actions{display:flex;gap:6px;flex-wrap:wrap}
+.pay-checkbox{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:#5d4f69;line-height:1.55;cursor:pointer}
+.pay-checkbox input{margin-top:3px;flex:none;width:auto}
+.pay-filters .pay-checkbox{align-self:center}
+.pay-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;align-items:center}
+.pay-admin-section .pay-provider-card h3{font-size:16px}
+
+@media(max-width:900px){.pay-mode-switch{grid-template-columns:1fr}.pay-provider-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.pay-simulator-actions{grid-template-columns:1fr}.pay-leg{grid-template-columns:1fr}.pay-summary{grid-template-columns:1fr}.pay-summary dd{text-align:left}}
+.pay-sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
