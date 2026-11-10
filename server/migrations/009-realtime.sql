@@ -1,0 +1,1 @@
+-- V4 realtime module schema (owned by the realtime module; append-only until released).

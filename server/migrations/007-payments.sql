@@ -1,0 +1,1 @@
+-- V4 payments module schema (owned by the payments module; append-only until released).

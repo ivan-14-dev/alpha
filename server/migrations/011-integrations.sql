@@ -1,0 +1,1 @@
+-- V4 integrations module schema (owned by the integrations module; append-only until released).

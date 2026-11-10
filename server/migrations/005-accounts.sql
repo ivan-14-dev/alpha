@@ -1,0 +1,1 @@
+-- V4 accounts module schema (owned by the accounts module; append-only until released).

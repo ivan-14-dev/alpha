@@ -1,0 +1,1 @@
+-- V4 files module schema (owned by the files module; append-only until released).

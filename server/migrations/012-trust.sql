@@ -1,0 +1,1 @@
+-- V4 trust module schema (owned by the trust module; append-only until released).

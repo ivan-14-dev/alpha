@@ -1,0 +1,1 @@
+-- V4 privacy module schema (owned by the privacy module; append-only until released).
