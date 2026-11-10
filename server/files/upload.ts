@@ -90,8 +90,9 @@ function receive(req: Request, user: User): Promise<{ prepared: Prepared; writte
       req.resume();
       const failure = error instanceof HttpError ? error : new HttpError(400, 'Envoi du fichier interrompu ou invalide.');
       if (!writing) { reject(failure); return; }
-      // Abort the encryption pipeline and only answer once its temp file is gone.
-      activeStream?.destroy();
+      // Abort the encryption pipeline and only answer once its temp file is gone. Destroying with an error matters:
+      // on Node 22/24 a source destroyed without one after push(null) leaves stream.pipeline waiting for 'end' forever.
+      activeStream?.destroy(failure);
       writing.then(({ written }) => removeQuietly(written.temp), () => undefined).finally(() => reject(failure));
     };
     parser.on('field', (name, value, info) => {
