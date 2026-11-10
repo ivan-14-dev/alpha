@@ -1,0 +1,22 @@
+{
+  "name": "Alpha — Construisons la suite.",
+  "short_name": "Alpha",
+  "description": "Alpha, le collectif qui fait avancer vos projets tech. Testez, collaborez et partagez.",
+  "lang": "fr",
+  "dir": "ltr",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#6854df",
+  "background_color": "#f8f9fc",
+  "categories": ["productivity", "developer", "social"],
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ],
+  "shortcuts": [
+    { "name": "Messages", "short_name": "Messages", "url": "/messages", "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }] },
+    { "name": "Notifications", "short_name": "Notifications", "url": "/notifications", "icons": [{ "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }] }
+  ]
+}
