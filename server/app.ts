@@ -84,6 +84,7 @@ app.use('/api/system', system);
 app.use('/api', (_req, _res, next) => next(new HttpError(404, 'Route introuvable.')));
 const build = resolve('dist');
 if (existsSync(resolve(build, 'index.html'))) {
+  app.get('/sw.js', (_req, res, next) => { res.setHeader('Cache-Control', 'no-cache'); next(); });
   app.use(express.static(build));
   app.get('/{*path}', (_req, res) => res.sendFile(resolve(build, 'index.html')));
 }
