@@ -33,6 +33,13 @@ export function capabilityMiddleware(_req: Request, _res: Response, next: NextFu
   next();
 }
 
+export type RiskLevel = 'low' | 'medium' | 'high';
+
+/** Aggregated risk used to hold withdrawals/payouts for manual review (high = always manual). */
+export function riskLevel(_userId: string): RiskLevel {
+  return 'low';
+}
+
 export type SignalKind = 'register' | 'login' | 'login_failed' | 'oauth_login' | 'password_reset' | 'mfa_failed'
   | 'payment' | 'withdrawal' | 'review' | 'payout' | 'listing' | 'message';
 

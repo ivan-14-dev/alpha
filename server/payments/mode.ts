@@ -58,3 +58,10 @@ export function toBase(amountMinor: number, currency: string): number {
   const major = amountMinor / 10 ** exponent(currency);
   return Math.floor((major / rate(currency)) * 10 ** exponent(base) + 1e-9);
 }
+
+/** Base minor units -> currency minor units rounded DOWN, for payouts/withdrawals (never over-pay). */
+export function payoutFromBase(amountBaseMinor: number, currency: string): number {
+  const base = baseCurrency();
+  const major = amountBaseMinor / 10 ** exponent(base);
+  return Math.floor(major * rate(currency) * 10 ** exponent(currency) + 1e-9);
+}
