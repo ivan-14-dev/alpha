@@ -756,8 +756,12 @@ test('real Docker sandbox isolation', { skip: dockerSkip ?? false, timeout: 2400
 
   await t.test('memory limit: allocations beyond the cgroup limit are OOM-killed', async () => {
     const { outcome, output } = await execute('head -c 300000000 /dev/zero | tail > /dev/null\necho "status=$?"', { memory_mb: 64 });
-    assert.equal(outcome.exitCode, 0, output);
-    assert.match(output, /^status=137$/m);
+    // Depending on the host cgroup setup (memory.oom.group), the kernel kills either the offending process or the whole container.
+    if (outcome.exitCode === 137) assert.doesNotMatch(output, /^status=0$/m, output);
+    else {
+      assert.equal(outcome.exitCode, 0, output);
+      assert.match(output, /^status=137$/m);
+    }
   });
 
   await t.test('pids limit stops fork bombs', async () => {
