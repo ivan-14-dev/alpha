@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
-import { migrate } from '../server/migrations.js';
+import { latestSchemaVersion, migrate, migrations } from '../server/migrations.js';
 
 const schema = readFileSync(new URL('../server/schema.sql', import.meta.url), 'utf8');
 
@@ -45,8 +45,11 @@ function legacyDatabase(path = ':memory:') {
 }
 
 const retainedTables = ['users', 'sessions', 'organizations', 'organization_members', 'projects', 'campaigns', 'applications', 'missions', 'test_reports', 'transactions', 'comments', 'post_likes', 'conversations', 'conversation_members', 'messages'];
+// Columns added by later additive migrations; their backfilled values are asserted explicitly below.
+const additiveColumns: Record<string, string[]> = { users: ['email_verified_at'], campaigns: ['payment_mode'] };
 function snapshot(database: DatabaseSync) {
-  return Object.fromEntries(retainedTables.map((table) => [table, database.prepare(`SELECT ${table === 'sessions' ? 'token_hash,user_id,expires_at' : '*'} FROM ${table} ORDER BY rowid`).all()]));
+  return Object.fromEntries(retainedTables.map((table) => [table, database.prepare(`SELECT ${table === 'sessions' ? 'token_hash,user_id,expires_at' : '*'} FROM ${table} ORDER BY rowid`).all()
+    .map((row) => Object.fromEntries(Object.entries(row).filter(([column]) => !additiveColumns[table]?.includes(column))))]));
 }
 function columns(database: DatabaseSync, table: 'posts' | 'reviews') {
   return database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
@@ -62,14 +65,16 @@ test('V1 data upgrades atomically without fabricating ratings or changing identi
     assert.deepEqual(snapshot(database), before);
     assert.deepEqual({ ...database.prepare('SELECT * FROM reviews').get() }, { ...originalReview, communication_rating: null, quality_rating: null });
     assert.deepEqual({ ...database.prepare('SELECT * FROM posts').get() }, { ...originalPost, project_id: null });
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM users WHERE email_verified_at IS NOT created_at').get()!.count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM campaigns WHERE payment_mode <> 'demo'").get()!.count, 0);
     assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()!.count, 2);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()!.count, migrations.length);
     for (const table of ['user_follows', 'project_follows', 'organization_invitations', 'project_tasks']) {
       assert.equal(database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get()!.count, 0);
     }
     migrate(database);
     assert.deepEqual(snapshot(database), before);
-    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()!.count, 2);
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()!.count, migrations.length);
   } finally { database.close(); }
 });
 
@@ -130,7 +135,7 @@ test('migration and legacy records survive a database restart', () => {
       restarted.exec(schema);
       migrate(restarted);
       assert.deepEqual(snapshot(restarted), before);
-      assert.equal(restarted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()!.count, 2);
+      assert.equal(restarted.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()!.count, migrations.length);
     } finally { restarted.close(); }
   } finally {
     for (const name of readdirSync(directory)) unlinkSync(join(directory, name));
@@ -199,6 +204,6 @@ test('failed V3 migration retains V2 schema, checksums and data atomically', () 
     assert.ok(!database.prepare('PRAGMA table_info(orders)').all().some((column) => column.name === 'version'));
     database.exec('DROP TABLE order_events');
     migrate(database);
-    assert.equal(database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()!.version, 3);
+    assert.equal(database.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()!.version, latestSchemaVersion);
   } finally { database.close(); }
 });

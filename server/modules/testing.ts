@@ -2,7 +2,9 @@ import { Router, type Request } from 'express';
 import { z } from 'zod';
 import { all, one, run, transaction } from '../db.js';
 import { audit, canManageProject, canReadProject, HttpError, id, notify, now, param, requireUser, safeUrl } from '../core.js';
-import { campaignBalance } from '../finance.js';
+import { campaignBudget } from '../payments/core/budget.js';
+import { campaignPaymentMode, payMissionFromEscrow, refundCampaignEscrow } from '../payments/escrow.js';
+import { paymentMode } from '../payments/mode.js';
 
 const router = Router();
 const identifier = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/, 'Identifiant invalide.');
@@ -34,7 +36,7 @@ interface Campaign {
   id: string; project_id: string; owner_id: string; title: string; description: string;
   kind: string; reward_cents: number; slots: number; requirements: string; target_devices: string;
   deadline: string; status: string; created_at: string; project_title: string;
-  project_visibility: string; owner_name: string; assigned_count: number;
+  project_visibility: string; owner_name: string; assigned_count: number; payment_mode: 'demo' | 'sandbox' | 'live';
 }
 interface Application {
   id: string; campaign_id: string; tester_id: string; motivation: string; status: string; created_at: string;
@@ -54,7 +56,7 @@ const campaignSelect = `SELECT c.*, p.title AS project_title, p.visibility AS pr
   (SELECT COUNT(*) FROM missions m WHERE m.campaign_id=c.id AND m.status!='cancelled') AS assigned_count
   FROM campaigns c JOIN projects p ON p.id=c.project_id JOIN users u ON u.id=c.owner_id`;
 const missionSelect = `SELECT m.*, c.owner_id, c.title AS campaign_title, c.project_id, c.reward_cents,
-  c.deadline, p.title AS project_title, u.name AS tester_name, u.avatar_color AS tester_color,
+  c.deadline, c.payment_mode, p.title AS project_title, u.name AS tester_name, u.avatar_color AS tester_color,
   owner.name AS owner_name FROM missions m JOIN campaigns c ON c.id=m.campaign_id
   JOIN projects p ON p.id=c.project_id JOIN users u ON u.id=m.tester_id
   JOIN users owner ON owner.id=c.owner_id`;
@@ -136,7 +138,7 @@ router.post('/campaigns', (req, res) => {
     input.kind, input.reward_cents, input.slots, input.requirements, input.target_devices, input.deadline);
     audit(user.id, 'campaign.created', 'campaign', campaignId);
   });
-  res.status(201).json({ campaign: getCampaign(campaignId), balance: campaignBalance(campaignId) });
+  res.status(201).json({ campaign: getCampaign(campaignId), balance: campaignBudget(campaignId) });
 });
 
 router.get('/campaigns/:id', (req, res) => {
@@ -153,7 +155,7 @@ router.get('/campaigns/:id', (req, res) => {
         `SELECT a.*,u.name AS tester_name,u.title AS tester_title,u.avatar_color AS tester_color,u.skills AS tester_skills
         FROM applications a JOIN users u ON u.id=a.tester_id WHERE a.campaign_id=?
         ORDER BY CASE a.status WHEN 'pending' THEN 0 ELSE 1 END,a.created_at LIMIT 200`, campaign.id),
-      balance: campaignBalance(campaign.id),
+      balance: campaignBudget(campaign.id),
     } : {}),
   });
 });
@@ -191,8 +193,10 @@ router.post('/applications/:id/accept', (req, res) => {
     if (application.status !== 'pending') throw new HttpError(409, 'Cette candidature a déjà été traitée.');
     openCampaign(campaign);
     if (campaign.assigned_count >= campaign.slots) throw new HttpError(409, 'Toutes les places sont déjà attribuées.');
-    if (campaignBalance(campaign.id).available_cents < campaign.reward_cents) {
-      throw new HttpError(409, 'Financez le budget de démonstration avant de sélectionner un testeur.');
+    if (campaignBudget(campaign.id).available_cents < campaign.reward_cents) {
+      throw new HttpError(409, campaign.payment_mode === 'demo' && paymentMode() === 'demo'
+        ? 'Financez le budget de démonstration avant de sélectionner un testeur.'
+        : 'Financez le budget de la campagne (séquestre) avant de sélectionner un testeur.');
     }
     run("UPDATE applications SET status='accepted' WHERE id=?", applicationId);
     run('INSERT INTO missions (id,campaign_id,tester_id,application_id) VALUES (?,?,?,?)',
@@ -201,7 +205,25 @@ router.post('/applications/:id/accept', (req, res) => {
     audit(user.id, 'application.accepted', 'application', applicationId);
     return campaign.id;
   });
-  res.status(201).json({ mission: missionWithReport(getMission(missionId, user.id)), balance: campaignBalance(campaignId) });
+  res.status(201).json({ mission: missionWithReport(getMission(missionId, user.id)), balance: campaignBudget(campaignId) });
+});
+
+router.post('/campaigns/:id/close', (req, res) => {
+  const user = requireUser(req);
+  const campaignId = resourceId(req);
+  const { reason } = z.object({ reason: z.string().trim().max(500).default('') }).strict().parse(req.body ?? {});
+  const refund = transaction(() => {
+    const campaign = getCampaign(campaignId);
+    ownerOnly(campaign.owner_id, user.id);
+    if (campaign.status === 'closed') throw new HttpError(409, 'Cette campagne est déjà fermée.');
+    run("UPDATE campaigns SET status='closed' WHERE id=?", campaign.id);
+    audit(user.id, 'campaign.closed', 'campaign', campaign.id, reason);
+    if (campaign.payment_mode === 'demo') return null;
+    const budget = campaignBudget(campaign.id);
+    // Missions in progress keep their reserved reward; only the unused escrow goes back to the payer.
+    return budget.available_cents > 0 ? refundCampaignEscrow(campaign.id, user.id, reason || 'Clôture de la campagne : solde non utilisé') : null;
+  });
+  res.json({ campaign: getCampaign(campaignId), balance: campaignBudget(campaignId), refund });
 });
 
 router.post('/applications/:id/reject', (req, res) => {
@@ -281,8 +303,13 @@ router.post('/missions/:id/accept', (req, res) => {
     requireStatus(mission, ['submitted']);
     if (!one('SELECT id FROM test_reports WHERE mission_id=?', missionId)) throw new HttpError(409, 'Aucun rapport à valider.');
     updateMission(missionId, 'accepted');
-    notify(mission.tester_id, 'mission', 'Votre rapport est validé', 'Le versement de démonstration peut maintenant être déclenché.', `/missions/${mission.campaign_id}`);
+    const realMoney = campaignPaymentMode(mission.campaign_id) !== 'demo';
+    notify(mission.tester_id, 'mission', 'Votre rapport est validé', realMoney
+      ? 'Votre récompense est versée depuis le séquestre de la campagne.'
+      : 'Le versement de démonstration peut maintenant être déclenché.', `/missions/${mission.campaign_id}`);
     audit(user.id, 'mission.accepted', 'mission', missionId);
+    // Real-money campaigns pay the tester from escrow atomically with the acceptance.
+    if (realMoney) payMissionFromEscrow(missionId, user.id);
   });
   res.json({ mission: missionWithReport(getMission(missionId, user.id)) });
 });

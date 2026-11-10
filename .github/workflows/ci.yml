@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NPM_CONFIG_FUND: "false"
+  NPM_CONFIG_UPDATE_NOTIFIER: "false"
+
+jobs:
+  test:
+    name: Build & tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # node:sqlite is available without a flag from 22.13 (engines: >=22.13.0); the Docker image ships Node 24.
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - name: Typecheck & build
+        run: npm run build
+      - name: Tests
+        run: npm test
+
+  audit:
+    name: npm audit (production deps)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Advisory only: a new upstream advisory must not block unrelated merges. Dependabot opens the fixes.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: npm audit --omit=dev
+        run: |
+          if ! npm audit --omit=dev --audit-level=high; then
+            echo "::warning title=npm audit::Vulnérabilités high/critical dans les dépendances de production (voir le journal)."
+          fi
+
+  docker:
+    name: Docker image (build + smoke test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - name: Build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: alpha-platform:ci
+          build-args: |
+            VCS_REF=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test (same hardening as deploy/compose.yaml)
+        run: |
+          set -euo pipefail
+          token="$(openssl rand -hex 32)"
+          docker run -d --name alpha-ci -p 127.0.0.1:3001:3001 \
+            --read-only --tmpfs /tmp:size=256m --cap-drop ALL --security-opt no-new-privileges:true \
+            -v alpha-ci-data:/data \
+            -e APP_ORIGIN=https://alpha.example.org \
+            -e ALPHA_SECRETS_KEY="$(openssl rand -base64 32)" \
+            -e METRICS_TOKEN="$token" \
+            alpha-platform:ci
+          for i in $(seq 1 60); do
+            if curl -fs http://127.0.0.1:3001/api/system/ready; then echo; break; fi
+            if [ "$i" = 60 ]; then echo "::error::/api/system/ready toujours KO après 60 s"; exit 1; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3001/api/health
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:3001/api/system/metrics)" = 401
+          # Capture first: `curl | grep -q` fails under pipefail when grep exits before curl finishes writing.
+          metrics="$(curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:3001/api/system/metrics)"
+          grep -q '^alpha_http_requests_total' <<< "$metrics"
+          grep -q '^alpha_backup_last_success_timestamp_seconds' <<< "$metrics"
+          index="$(curl -fsS http://127.0.0.1:3001/)"
+          grep -q 'id="root"' <<< "$index"
+          test "$(docker exec alpha-ci id -u)" != 0
+          docker exec alpha-ci npm run --silent backup
+          docker exec alpha-ci npm run --silent backup -- --list
+      - name: Container logs
+        if: always()
+        run: docker logs alpha-ci 2>&1 | tail -n 200 || true
+
+  postgres:
+    name: PostgreSQL export
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: alpha_test
+          POSTGRES_USER: alpha
+          POSTGRES_PASSWORD: alpha
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U alpha -d alpha_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      ALPHA_PG_URL: postgres://alpha:alpha@127.0.0.1:5432/alpha_test
+      # Standard libpq variables, read by `pg` when no connection string is given.
+      PGHOST: 127.0.0.1
+      PGPORT: "5432"
+      PGUSER: alpha
+      PGPASSWORD: alpha
+      PGDATABASE: alpha_test
+    steps:
+      - uses: actions/checkout@v7
+      - name: Detect PostgreSQL tests
+        id: detect
+        run: |
+          if compgen -G "tests/postgres/*.test.ts" > /dev/null; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Aucun test dans tests/postgres : job ignoré."
+          fi
+      - uses: actions/setup-node@v7
+        if: steps.detect.outputs.present == 'true'
+        with:
+          node-version: 24
+          cache: npm
+      - if: steps.detect.outputs.present == 'true'
+        run: npm ci
+      - name: npm run test:postgres
+        if: steps.detect.outputs.present == 'true'
+        run: npm run test:postgres

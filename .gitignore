@@ -38,3 +38,7 @@ next-env.d.ts
 /data
 /test-results
 /playwright-report
+
+# V4 ops scratch dirs and sandbox TLS client keys
+/.ops-test-*/
+/deploy/sandbox-docker-certs/

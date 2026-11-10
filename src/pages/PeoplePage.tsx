@@ -5,6 +5,8 @@ import { Avatar, Badge, EmptyState, ErrorState, Loading, LoginNotice, PageHeader
 import FollowButton from '../components/FollowButton';
 import ReputationHighlights from '../components/ReputationHighlights';
 import AccountSecurity from '../components/AccountSecurity';
+import NotificationPreferences from '../components/NotificationPreferences';
+import PrivacyControls from '../components/PrivacyControls';
 import { api, date, errorMessage } from '../lib/api';
 import { useAuth, type User } from '../lib/auth';
 
@@ -207,6 +209,8 @@ export function SettingsPage() {
     <ProfileForm key={user.id} user={user} refresh={refresh} />
     <Organizations key={`organizations-${user.id}`} userId={user.id} />
     <AccountSecurity key={`security-${user.id}`} />
+    <NotificationPreferences key={`notifications-${user.id}`} />
+    <PrivacyControls key={`privacy-${user.id}`} />
   </div>;
 }
 

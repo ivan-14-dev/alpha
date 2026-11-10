@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck, ChevronLeft, ChevronRight, LockKeyhole, Mail, Plus, RefreshCw, Search, Send, X } from 'lucide-react';
+import { ArrowLeft, ArrowUpRight, Bell, Check, CheckCheck, ChevronLeft, ChevronRight, LockKeyhole, Mail, Paperclip, Plus, RefreshCw, Search, Send, X } from 'lucide-react';
+import FileAttachments from '../components/FileAttachments';
 import { Avatar, Badge, EmptyState, ErrorState, Loading, LoginNotice, Modal, PageHeader, useApi } from '../components/ui';
 import { api, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import { useRealtime, useRealtimeEvent, useUnreadNotifications, type ConversationReadEvent, type LiveNotification, type MessageCreatedEvent, type TypingEvent } from '../lib/realtime';
+import '../styles/realtime.css';
 
 interface Person {
   id: string;
@@ -20,6 +23,7 @@ interface Conversation {
   last_message_at?: string | null;
   last_message_body?: string | null;
   last_sender_id?: string | null;
+  unread_count?: number;
 }
 interface Message {
   id: string;
@@ -30,6 +34,7 @@ interface Message {
 }
 interface Thread {
   conversation: Conversation;
+  reads?: { user_id: string; last_read_at: string }[];
   messages: Message[];
   has_more: boolean;
   next_before: string | null;
@@ -208,6 +213,12 @@ function NewConversation({ onClose, onCreated }: {
   </Modal>;
 }
 
+function LiveStatus({ connected }: { connected: boolean }) {
+  return <span className={`realtime-status ${connected ? 'is-live' : ''}`} title={connected ? 'Mises à jour en temps réel actives.' : 'Connexion temps réel en cours… Actualisez si besoin.'}>
+    <span aria-hidden="true" />{connected ? 'En direct' : 'Connexion…'}
+  </span>;
+}
+
 function Inbox({ userId }: { userId: string }) {
   const [params, setParams] = useSearchParams();
   const selectedId = params.get('conversation') || '';
@@ -229,22 +240,152 @@ function Inbox({ userId }: { userId: string }) {
   const selectedRef = useRef(selectedId);
   selectedRef.current = selectedId;
   const scrollArea = useRef<HTMLDivElement>(null);
+  const { connected } = useRealtime();
+  const [overlay, setOverlay] = useState<Record<string, Partial<Conversation>>>({});
+  const [live, setLive] = useState<{ conversationId: string; messages: Message[] }>({ conversationId: '', messages: [] });
+  const [reads, setReads] = useState<Record<string, string>>({});
+  const [typing, setTyping] = useState<Record<string, { name: string; until: number }>>({});
+  const [visible, setVisible] = useState(() => document.visibilityState === 'visible');
+  const lastTypingSent = useRef(0);
+  const markedRead = useRef('');
+  const stickToBottom = useRef(false);
   const body = draft.conversationId === selectedId ? draft.body : '';
   const older = history?.conversationId === selectedId ? history : null;
   const nextBefore = older ? older.next : activeThread?.next_before;
-  const messages = [...(older?.messages ?? []), ...(activeThread?.messages ?? [])]
+  const liveMessages = live.conversationId === selectedId ? live.messages : [];
+  const messages = [...(older?.messages ?? []), ...(activeThread?.messages ?? []), ...liveMessages]
     .filter((message, index, combined) => combined.findIndex((other) => other.id === message.id) === index);
+  const lastMessage = messages[messages.length - 1];
+  const lastOwnId = [...messages].reverse().find((message) => message.sender_id === userId)?.id;
+  const peerReadAt = Object.entries(reads).filter(([id]) => id !== userId).map(([, at]) => at).sort().pop() ?? '';
+  const typingNames = Object.entries(typing).filter(([id]) => id !== userId).map(([id, entry]) =>
+    activeThread?.conversation.participants.find((person) => person.id === id)?.name || entry.name || 'Un membre');
+  const readKey = activeThread && !thread.loading && !thread.error ? `${activeThread.conversation.id}:${lastMessage?.id ?? ''}` : '';
+  const listed = (conversations.data?.conversations ?? []).map((conversation) => ({ ...conversation, ...overlay[conversation.id] }));
+  if (offset === 0) listed.sort((a, b) => (b.last_message_at || b.created_at).localeCompare(a.last_message_at || a.created_at));
 
   useEffect(() => {
     setDraft({ conversationId: selectedId, body: '' });
     setSendError('');
     setHistory(null);
     setHistoryError('');
+    setLive({ conversationId: selectedId, messages: [] });
+    setReads({});
+    setTyping({});
+    lastTypingSent.current = 0;
   }, [selectedId]);
 
   useEffect(() => {
     if (activeThread && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight;
   }, [activeThread]);
+
+  useEffect(() => {
+    if (stickToBottom.current && scrollArea.current) scrollArea.current.scrollTop = scrollArea.current.scrollHeight;
+    stickToBottom.current = false;
+  }, [liveMessages.length]);
+
+  useEffect(() => {
+    const receipts = activeThread?.reads;
+    if (!receipts) return;
+    setReads((previous) => {
+      const next = { ...previous };
+      for (const receipt of receipts) if (!next[receipt.user_id] || next[receipt.user_id] < receipt.last_read_at) next[receipt.user_id] = receipt.last_read_at;
+      return next;
+    });
+  }, [activeThread]);
+
+  // Server overlays are only valid for the list they were computed against.
+  useEffect(() => { setOverlay({}); }, [conversations.data]);
+
+  useEffect(() => {
+    const onVisibility = () => setVisible(document.visibilityState === 'visible');
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, []);
+
+  // Read receipt: the visible, open conversation is read up to its latest message.
+  useEffect(() => {
+    if (!readKey || !visible || markedRead.current === readKey) return;
+    markedRead.current = readKey;
+    const conversationId = readKey.slice(0, readKey.indexOf(':'));
+    api(`/communication/conversations/${encodeURIComponent(conversationId)}/read`, { method: 'POST' })
+      .then(() => setOverlay((previous) => ({ ...previous, [conversationId]: { ...previous[conversationId], unread_count: 0 } })))
+      .catch(() => { if (markedRead.current === readKey) markedRead.current = ''; });
+  }, [readKey, visible]);
+
+  useEffect(() => {
+    const entries = Object.values(typing);
+    if (!entries.length) return;
+    const delay = Math.max(50, Math.min(...entries.map((entry) => entry.until)) - Date.now());
+    const timer = window.setTimeout(() => setTyping((previous) =>
+      Object.fromEntries(Object.entries(previous).filter(([, entry]) => entry.until > Date.now()))), delay);
+    return () => window.clearTimeout(timer);
+  }, [typing]);
+
+  function patchConversation(conversationId: string, message: Message, unreadDelta: number) {
+    setOverlay((previous) => {
+      const base = conversations.data?.conversations.find((conversation) => conversation.id === conversationId);
+      if (!base) return previous;
+      const current = previous[conversationId] ?? {};
+      return {
+        ...previous,
+        [conversationId]: {
+          ...current,
+          last_message_at: message.created_at,
+          last_message_body: message.body.slice(0, 160),
+          last_sender_id: message.sender_id,
+          unread_count: (current.unread_count ?? base.unread_count ?? 0) + unreadDelta,
+        },
+      };
+    });
+  }
+
+  function appendLive(conversationId: string, message: Message) {
+    setLive((previous) => previous.conversationId !== conversationId || previous.messages.some((item) => item.id === message.id)
+      ? previous : { ...previous, messages: [...previous.messages, message] });
+  }
+
+  useRealtimeEvent<MessageCreatedEvent>('message.created', (event) => {
+    const { conversation_id: conversationId, message } = event;
+    if (message.conversation_id !== conversationId) return;
+    const own = message.sender_id === userId;
+    const open = conversationId === selectedRef.current;
+    if (open) {
+      const area = scrollArea.current;
+      stickToBottom.current = own || !area || area.scrollHeight - area.scrollTop - area.clientHeight < 160;
+      appendLive(conversationId, message);
+      setTyping((previous) => {
+        if (!previous[message.sender_id]) return previous;
+        const next = { ...previous };
+        delete next[message.sender_id];
+        return next;
+      });
+    }
+    const known = conversations.data?.conversations.some((conversation) => conversation.id === conversationId);
+    if (known) patchConversation(conversationId, message, own || (open && visible) ? 0 : 1);
+    else if (offset === 0 && !delayedQuery && !conversations.loading) conversations.reload();
+  });
+
+  useRealtimeEvent<ConversationReadEvent>('conversation.read', (event) => {
+    if (event.user_id === userId) {
+      setOverlay((previous) => ({ ...previous, [event.conversation_id]: { ...previous[event.conversation_id], unread_count: 0 } }));
+    }
+    if (event.conversation_id !== selectedRef.current) return;
+    setReads((previous) => previous[event.user_id] && previous[event.user_id] >= event.read_at ? previous : { ...previous, [event.user_id]: event.read_at });
+  });
+
+  useRealtimeEvent<TypingEvent>('typing', (event) => {
+    if (event.conversation_id !== selectedRef.current || event.user_id === userId) return;
+    setTyping((previous) => ({ ...previous, [event.user_id]: { name: event.name, until: Date.now() + 5000 } }));
+  });
+
+  function notifyTyping(value: string) {
+    if (!activeThread || !value.trim()) return;
+    const current = Date.now();
+    if (current - lastTypingSent.current < 3000) return;
+    lastTypingSent.current = current;
+    void api('/realtime/typing', { method: 'POST', body: JSON.stringify({ conversation_id: activeThread.conversation.id }) }).catch(() => undefined);
+  }
 
   function select(conversationId: string) {
     setParams((previous) => {
@@ -282,15 +423,18 @@ function Inbox({ userId }: { userId: string }) {
     setSending(true);
     setSendError('');
     try {
-      await api(`/communication/conversations/${encodeURIComponent(requestedId)}/messages`, {
+      const result = await api<{ message: Message }>(`/communication/conversations/${encodeURIComponent(requestedId)}/messages`, {
         method: 'POST', body: JSON.stringify({ body }),
       });
       setDraft((previous) => previous.conversationId === requestedId ? { ...previous, body: '' } : previous);
+      lastTypingSent.current = 0;
+      // The realtime event may arrive before or after this response: both paths de-duplicate by message id.
       if (selectedRef.current === requestedId) {
-        setHistory(null);
-        thread.reload();
+        stickToBottom.current = true;
+        appendLive(requestedId, result.message);
       }
-      conversations.reload();
+      if (conversations.data?.conversations.some((conversation) => conversation.id === requestedId)) patchConversation(requestedId, result.message, 0);
+      else conversations.reload();
     } catch (error) {
       if (selectedRef.current === requestedId) setSendError(errorMessage(error));
     } finally {
@@ -304,19 +448,20 @@ function Inbox({ userId }: { userId: string }) {
     <section className={`card communication-inbox ${selectedId ? 'has-selection' : ''}`} aria-label="Messagerie privée">
       <aside className="communication-sidebar" aria-label="Conversations">
         <div className="communication-search">
-          <div className="row-between" style={{ marginBottom: 16 }}><strong>Boîte de réception</strong><button type="button" className="icon-button" aria-label="Actualiser les conversations" disabled={conversations.loading} onClick={conversations.reload}><RefreshCw size={16} /></button></div>
+          <div className="row-between" style={{ marginBottom: 16 }}><span className="row gap-sm"><strong>Boîte de réception</strong><LiveStatus connected={connected} /></span><button type="button" className="icon-button" aria-label="Actualiser les conversations" disabled={conversations.loading} onClick={conversations.reload}><RefreshCw size={16} /></button></div>
           <div className="field"><label htmlFor="conversation-search" className="small muted">Rechercher une conversation</label><div className="search-input"><Search size={16} aria-hidden="true" /><input id="conversation-search" type="search" value={query} maxLength={120} placeholder="Un nom, un objet…" onChange={(event) => { setQuery(event.target.value); setOffset(0); }} /></div></div>
         </div>
         {conversations.loading && <Loading />}
         {conversations.error && <div className="communication-status"><ErrorState message={conversations.error} /><button type="button" className="button button-secondary button-small" onClick={conversations.reload}>Réessayer</button></div>}
         {!conversations.loading && !conversations.error && conversations.data && <>
-          {conversations.data.conversations.length ? <ul className="communication-list">
-            {conversations.data.conversations.map((conversation) => {
+          {listed.length ? <ul className="communication-list">
+            {listed.map((conversation) => {
               const peers = conversation.participants.filter((person) => person.id !== userId);
+              const unreadCount = selectedId === conversation.id ? 0 : conversation.unread_count ?? 0;
               return <li key={conversation.id}><button type="button" className="communication-item" aria-current={selectedId === conversation.id ? 'true' : undefined} disabled={sending} onClick={() => select(conversation.id)}>
                 <Avatar name={peers[0]?.name || 'Conversation'} color={peers[0]?.avatar_color} />
                 <span className="communication-item-main">
-                  <span className="row-between" style={{ gap: 8 }}><strong className="communication-truncate">{peers.map((peer) => peer.name).join(', ') || 'Conversation privée'}</strong></span>
+                  <span className="row-between" style={{ gap: 8 }}><strong className="communication-truncate">{peers.map((peer) => peer.name).join(', ') || 'Conversation privée'}</strong>{unreadCount > 0 && <span className="realtime-unread-count" aria-label={`${unreadCount} message${unreadCount > 1 ? 's' : ''} non lu${unreadCount > 1 ? 's' : ''}`}>{unreadCount > 99 ? '99+' : unreadCount}</span>}</span>
                   <span className="communication-truncate communication-item-subject">{conversation.subject}</span>
                   <span className="small muted communication-truncate">{conversation.last_sender_id === userId ? 'Vous : ' : ''}{conversation.last_message_body || 'Aucun message'}</span>
                   <time className="small muted" style={{ display: 'block', marginTop: 10 }} dateTime={conversation.last_message_at || conversation.created_at}>{timestamp(conversation.last_message_at || conversation.created_at)}</time>
@@ -351,14 +496,21 @@ function Inbox({ userId }: { userId: string }) {
                 return <li className={`communication-message ${own ? 'own' : ''}`} key={message.id}>
                   <div className="communication-message-meta"><strong>{own ? 'Vous' : sender?.name || 'Membre'}</strong><time dateTime={message.created_at}>{timestamp(message.created_at)}</time></div>
                   <div className="communication-text">{message.body}</div>
+                  {message.id === lastOwnId && <div className="realtime-receipt">{peerReadAt && peerReadAt >= message.created_at
+                    ? <><CheckCheck size={13} aria-hidden="true" /> Lu</> : <><Check size={13} aria-hidden="true" /> Envoyé</>}</div>}
                 </li>;
               })}
             </ol> : <EmptyState title="Commencez la conversation" description="Envoyez votre premier message ci-dessous." />}
           </div>
+          <div className="realtime-typing" aria-live="polite">{typingNames.length ? <><span className="realtime-typing-dots" aria-hidden="true"><i /><i /><i /></span>{typingNames.length === 1 ? `${typingNames[0]} est en train d’écrire…` : `${typingNames.join(' et ')} sont en train d’écrire…`}</> : null}</div>
+          <details className="communication-attachments" key={activeThread.conversation.id}>
+            <summary><Paperclip size={14} aria-hidden="true" /> Pièces jointes</summary>
+            <FileAttachments resourceType="conversation" resourceId={activeThread.conversation.id} purpose="message_attachment" canUpload title="Pièces jointes de la conversation" />
+          </details>
           <form className="communication-compose" onSubmit={send}>
-            <div className="field"><label htmlFor="message-reply">Votre réponse</label><textarea id="message-reply" placeholder="Écrivez votre message…" maxLength={10_000} rows={3} value={body} disabled={sending} onChange={(event) => setDraft({ conversationId: selectedId, body: event.target.value })} required /></div>
+            <div className="field"><label htmlFor="message-reply">Votre réponse</label><textarea id="message-reply" placeholder="Écrivez votre message…" maxLength={10_000} rows={3} value={body} disabled={sending} onChange={(event) => { setDraft({ conversationId: selectedId, body: event.target.value }); notifyTyping(event.target.value); }} required /></div>
             <ErrorState message={sendError} />
-            <div className="communication-compose-footer"><span className="help-text">{body.length.toLocaleString('fr-FR')} / 10 000 caractères · Texte uniquement</span><button type="submit" className="button button-primary" disabled={sending || thread.loading || !body.trim()}><Send size={16} /> {sending ? 'Envoi…' : 'Envoyer'}</button></div>
+            <div className="communication-compose-footer"><span className="help-text">{body.length.toLocaleString('fr-FR')} / 10 000 caractères · Fichiers via « Pièces jointes »</span><button type="submit" className="button button-primary" disabled={sending || thread.loading || !body.trim()}><Send size={16} /> {sending ? 'Envoi…' : 'Envoyer'}</button></div>
           </form>
         </>}
       </section>
@@ -386,6 +538,33 @@ function NotificationInbox() {
   const [pending, setPending] = useState('');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const { connected } = useRealtime();
+  const liveUnread = useUnreadNotifications();
+  const [live, setLive] = useState<Notification[]>([]);
+  const [allRead, setAllRead] = useState(false);
+  const loaded = notifications.data && !notifications.loading ? notifications.data : null;
+  const unreadCount = liveUnread ?? loaded?.unread_count ?? 0;
+  const items = loaded ? [...live, ...loaded.notifications]
+    .filter((notification, index, combined) => combined.findIndex((other) => other.id === notification.id) === index)
+    .map((notification) => allRead && !notification.read_at ? { ...notification, read_at: new Date().toISOString() } : notification) : [];
+
+  // The fetched page is authoritative: drop live copies it already contains and forget the local "all read" state.
+  useEffect(() => {
+    setAllRead(false);
+    if (loaded) setLive((previous) => previous.filter((item) => !loaded.notifications.some((notification) => notification.id === item.id)));
+  }, [loaded]);
+  useEffect(() => { setLive([]); }, [offset]);
+
+  useRealtimeEvent<LiveNotification>('notification.created', (event) => {
+    if (offset !== 0) return;
+    const notification: Notification = { id: event.id, kind: event.kind, title: event.title, body: event.body, link: event.link, read_at: null, created_at: event.created_at };
+    setLive((previous) => previous.some((item) => item.id === notification.id) ? previous : [notification, ...previous].slice(0, 50));
+  });
+
+  useRealtimeEvent<{ unread: number }>('notification.read', (event) => {
+    // Another tab (or the messages page) read everything: reflect it without a reload.
+    if (event.unread === 0) setAllRead(true);
+  });
 
   async function markRead(notificationId?: string) {
     if (pending) return;
@@ -395,6 +574,7 @@ function NotificationInbox() {
     try {
       await api(notificationId ? `/communication/notifications/${encodeURIComponent(notificationId)}/read` : '/communication/notifications/read-all', { method: 'POST' });
       setSuccess(notificationId ? 'Notification marquée comme lue.' : 'Toutes vos notifications sont marquées comme lues.');
+      setLive((previous) => previous.map((item) => !notificationId || item.id === notificationId ? { ...item, read_at: item.read_at ?? new Date().toISOString() } : item));
       notifications.reload();
     } catch (error) {
       setError(errorMessage(error));
@@ -405,9 +585,9 @@ function NotificationInbox() {
 
   return <>
     <PageHeader eyebrow="Gardez le fil" title="Notifications" description="Les nouvelles de vos projets, collaborations et conversations, réunies ici."
-      action={<button type="button" className="button button-secondary" disabled={!!pending || notifications.loading || !notifications.data?.unread_count} onClick={() => void markRead()}><CheckCheck size={17} /> {pending === 'all' ? 'Mise à jour…' : 'Tout marquer comme lu'}</button>} />
+      action={<button type="button" className="button button-secondary" disabled={!!pending || notifications.loading || !unreadCount} onClick={() => void markRead()}><CheckCheck size={17} /> {pending === 'all' ? 'Mise à jour…' : 'Tout marquer comme lu'}</button>} />
     <div className="row-between" style={{ marginBottom: 20 }}>
-      <div className="row gap-sm"><h2 className="section-heading" style={{ margin: 0 }}>Votre activité</h2>{notifications.data && !notifications.loading && <Badge tone={notifications.data.unread_count ? 'purple' : 'neutral'}>{notifications.data.unread_count} non lue{notifications.data.unread_count > 1 ? 's' : ''}</Badge>}</div>
+      <div className="row gap-sm"><h2 className="section-heading" style={{ margin: 0 }}>Votre activité</h2>{loaded && <Badge tone={unreadCount ? 'purple' : 'neutral'}>{unreadCount} non lue{unreadCount > 1 ? 's' : ''}</Badge>}<LiveStatus connected={connected} /></div>
       <button type="button" className="button button-ghost button-small" disabled={notifications.loading || !!pending} onClick={notifications.reload}><RefreshCw size={15} /> Actualiser</button>
     </div>
     <ErrorState message={error} />
@@ -415,8 +595,8 @@ function NotificationInbox() {
     {notifications.loading && <Loading />}
     {notifications.error && <div><ErrorState message={notifications.error} /><button type="button" className="button button-secondary" onClick={notifications.reload}>Réessayer</button></div>}
     {!notifications.loading && !notifications.error && notifications.data && <>
-      {notifications.data.notifications.length ? <section className="card" style={{ overflow: 'hidden' }} aria-label="Notifications">
-        {notifications.data.notifications.map((notification) => <article className={`communication-notification ${notification.read_at ? '' : 'unread'}`} key={notification.id}>
+      {items.length ? <section className="card" style={{ overflow: 'hidden' }} aria-label="Notifications" aria-live="polite" aria-relevant="additions">
+        {items.map((notification) => <article className={`communication-notification ${notification.read_at ? '' : 'unread'} ${live.some((item) => item.id === notification.id) ? 'realtime-new' : ''}`} key={notification.id}>
           <div className="communication-notification-icon">{notification.kind === 'message' ? <Mail size={21} /> : <Bell size={21} />}</div>
           <div className="communication-notification-main">
             <div className="row-between" style={{ alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}><h2>{notification.title}</h2>{!notification.read_at && <Badge tone="purple">Non lue</Badge>}</div>
@@ -431,7 +611,9 @@ function NotificationInbox() {
       </section> : <div className="card"><EmptyState title="Vous êtes à jour" description="Vos prochaines notifications apparaîtront ici. En attendant, poursuivez vos échanges." action={<Link className="button button-primary" to="/messages">Ouvrir la messagerie <ArrowUpRight size={16} /></Link>} /></div>}
       <Pagination offset={offset} hasMore={notifications.data.has_more} pending={!!pending} onChange={setOffset} />
     </>}
-    <p className="help-text" style={{ marginTop: 20 }}>Ces notifications sont consultables dans Alpha. Actualisez la page pour retrouver les dernières nouvelles.</p>
+    <p className="help-text" style={{ marginTop: 20 }}>{connected
+      ? 'Les nouvelles notifications s’affichent ici en temps réel. Choisissez lesquelles vous recevez aussi par e-mail ou en push dans '
+      : 'Connexion temps réel indisponible pour le moment : actualisez pour voir les dernières nouvelles. Gérez vos canaux dans '}<Link to="/settings#notifications">Paramètres</Link>.</p>
   </>;
 }
 

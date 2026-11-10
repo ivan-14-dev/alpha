@@ -1,0 +1,71 @@
+/* Compliance module: wallet, KYC, payout methods, withdrawals, invoices, admin console. OWNER: compliance module. */
+.cmp-page{display:flex;flex-direction:column;gap:20px;padding-bottom:40px}
+.cmp-notice{display:flex;align-items:flex-start;gap:10px;border-radius:10px;padding:13px 16px;font-size:12px;line-height:1.6;border:1px solid}
+.cmp-notice svg{flex:none;margin-top:2px}
+.cmp-notice strong{display:block;font-weight:650}
+.cmp-notice-demo{background:#fdf8ee;border-color:#f0e5cd;color:#7d5f2c}
+.cmp-notice-sandbox{background:#eef6ff;border-color:#cfe2f8;color:#2f5680}
+.cmp-notice-live{background:#eefaf3;border-color:#cdeedb;color:#24613f}
+.cmp-notice-warning{background:#fff6ec;border-color:#f5d9b8;color:#8a5419}
+.cmp-notice a{color:inherit;text-decoration:underline;font-weight:600}
+.cmp-balances{margin:0}
+.cmp-balances .stat-card{display:flex;flex-direction:column;gap:6px}
+.cmp-balances .stat-label{display:flex;align-items:center;gap:6px;margin:0}
+.cmp-balances .stat-value{font-variant-numeric:tabular-nums}
+.cmp-stat-hint{font-size:11px;color:var(--muted);line-height:1.5}
+.cmp-amount{font-variant-numeric:tabular-nums;white-space:nowrap;text-align:right}
+.cmp-amount-in{color:#1f7a4a;font-weight:600}
+.cmp-amount-out{color:#a03a3a;font-weight:600}
+.cmp-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;overflow-wrap:anywhere}
+.cmp-sub{display:block;font-size:11px;color:var(--muted);margin-top:2px;line-height:1.45;overflow-wrap:anywhere}
+.cmp-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:20px;align-items:start}
+.cmp-limits{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;font-size:12px;color:#5d4f69}
+.cmp-limits li{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dashed var(--line);padding-bottom:7px}
+.cmp-limits li:last-child{border-bottom:0;padding-bottom:0}
+.cmp-limits strong{font-variant-numeric:tabular-nums;color:#3f3170;white-space:nowrap}
+.cmp-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.cmp-actions-end{justify-content:flex-end}
+.cmp-inline-input{display:flex;align-items:center;gap:8px}
+.cmp-inline-input input{flex:1;min-width:0}
+.cmp-currency{font-weight:650;color:#6b5a7b;font-size:12px}
+.cmp-methods{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+.cmp-method{display:flex;align-items:center;justify-content:space-between;gap:12px;border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:#fff;flex-wrap:wrap}
+.cmp-method-main{display:flex;align-items:center;gap:12px;min-width:0}
+.cmp-method-icon{display:grid;place-items:center;width:36px;height:36px;border-radius:9px;background:var(--purple-light);color:var(--purple);flex:none}
+.cmp-method-title{font-weight:650;font-size:13px;color:#2f2a3d;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.cmp-kind-picker{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+.cmp-kind-option{display:flex;flex-direction:column;gap:4px;align-items:flex-start;text-align:left;border:1px solid var(--line);border-radius:10px;padding:12px;background:#fff;color:#3f3170;font-size:12px}
+.cmp-kind-option strong{display:flex;align-items:center;gap:7px;font-size:13px}
+.cmp-kind-option span{color:var(--muted);font-size:11px;line-height:1.45}
+.cmp-kind-option[aria-pressed="true"]{border-color:var(--purple);box-shadow:0 0 0 2px #e3defb;background:#fbfaff}
+.cmp-steps{list-style:none;margin:0 0 4px;padding:0;display:flex;gap:8px;flex-wrap:wrap;counter-reset:cmp-step}
+.cmp-steps li{counter-increment:cmp-step;display:flex;align-items:center;gap:7px;font-size:11px;color:var(--muted);padding:6px 10px;border-radius:999px;background:#f6f5fa}
+.cmp-steps li::before{content:counter(cmp-step);display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#e6e3f0;color:#6b5a7b;font-weight:700;font-size:10px}
+.cmp-step-button{all:unset;cursor:pointer}
+.cmp-step-button:focus-visible{outline:3px solid #a798f2;outline-offset:3px;border-radius:4px}
+.cmp-steps li.is-done{color:#24613f;background:#eefaf3}
+.cmp-steps li.is-done::before{background:#bfe6cf;color:#1f5b3a}
+.cmp-steps li.is-current{color:var(--purple);background:var(--purple-light);font-weight:600}
+.cmp-steps li.is-current::before{background:var(--purple);color:#fff}
+.cmp-docs{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.cmp-docs li{display:flex;align-items:center;justify-content:space-between;gap:10px;border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:12px;flex-wrap:wrap}
+.cmp-docs a{color:var(--purple);text-decoration:underline}
+.cmp-fieldset{border:1px solid var(--line);border-radius:10px;padding:14px 16px 16px;margin:0;display:flex;flex-direction:column;gap:14px;min-width:0}
+.cmp-fieldset legend{padding:0 6px;font-size:12px;font-weight:650;color:#5d4f69}
+.cmp-dl{display:grid;grid-template-columns:minmax(120px,auto) minmax(0,1fr);gap:8px 16px;margin:0;font-size:12px}
+.cmp-dl dt{color:var(--muted)}
+.cmp-dl dd{margin:0;color:#2f2a3d;overflow-wrap:anywhere}
+.cmp-checkbox{display:flex;align-items:flex-start;gap:9px;font-size:12px;color:#5d4f69;line-height:1.55;cursor:pointer}
+.cmp-checkbox input{margin-top:3px;flex:none}
+.cmp-rates{display:flex;flex-direction:column;gap:8px}
+.cmp-rate-row{display:grid;grid-template-columns:110px 140px auto;gap:8px;align-items:center}
+.cmp-table-actions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.cmp-legal{font-size:11px;color:var(--muted);line-height:1.6;border-top:1px solid var(--line);padding-top:12px;margin:0}
+.cmp-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.cmp-filters .field{min-width:150px}
+.cmp-more{display:flex;justify-content:center;padding:12px}
+.cmp-problems{margin:6px 0 0;padding-left:18px}
+.cmp-modal-body{display:flex;flex-direction:column;gap:16px}
+@media(max-width:1100px){.cmp-grid{grid-template-columns:1fr}}
+@media(max-width:700px){.cmp-kind-picker{grid-template-columns:1fr}.cmp-rate-row{grid-template-columns:1fr 1fr}.cmp-rate-row .button{grid-column:1/-1}.cmp-dl{grid-template-columns:1fr}.cmp-dl dt{margin-top:6px}}
+@media print{.cmp-actions,.tabs{display:none}}

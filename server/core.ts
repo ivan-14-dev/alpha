@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { one, run } from './db.js';
+import { emitDomainEvent, emitNotification } from './platform/events.js';
+import { log } from './platform/log.js';
 
 export interface User {
   id: string;
@@ -71,13 +73,19 @@ export function isPublicPost(postId: string): boolean {
     WHERE p.id=? AND (p.project_id IS NULL OR project.visibility='public')`, postId);
 }
 
+/** Inserts an in-app notification, then runs channel hooks (realtime, email, push) in the same transaction. */
 export function notify(userId: string, kind: string, title: string, body = '', link = '/') {
-  run('INSERT INTO notifications (id,user_id,kind,title,body,link) VALUES (?,?,?,?,?,?)', id(), userId, kind, title, body, link);
+  const notificationId = id();
+  run('INSERT INTO notifications (id,user_id,kind,title,body,link) VALUES (?,?,?,?,?,?)', notificationId, userId, kind, title, body, link);
+  emitNotification({ id: notificationId, user_id: userId, kind, title, body, link });
+  return notificationId;
 }
 
+/** Audit trail entry. Also published as a domain event (outgoing webhooks, risk detectors) in the same transaction. */
 export function audit(actorId: string, action: string, targetType: string, targetId: string, detail = '') {
   run('INSERT INTO audit_events (id,actor_id,action,target_type,target_id,detail) VALUES (?,?,?,?,?,?)',
     id(), actorId, action, targetType, targetId, detail);
+  emitDomainEvent({ action, actor_id: actorId, target_type: targetType, target_id: targetId, detail });
 }
 
 export function errorHandler(error: unknown, _req: Request, res: Response, _next: NextFunction) {
@@ -86,7 +94,9 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
     return;
   }
   if (error instanceof HttpError) {
-    res.status(error.status).json({ error: error.message });
+    // Trust restrictions carry a structured statement of reasons (DSA art. 17) so the client can link to the appeal.
+    const restriction = (error as HttpError & { restriction?: unknown }).restriction;
+    res.status(error.status).json(restriction ? { error: error.message, restriction } : { error: error.message });
     return;
   }
   if (error instanceof SyntaxError && 'body' in error) {
@@ -97,6 +107,7 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
     res.status(413).json({ error: 'Le contenu envoye est trop volumineux.' });
     return;
   }
-  console.error(error);
+  if (process.env.NODE_ENV === 'production') log.error('http.unhandled_error', { error, method: _req.method, path: _req.path, request_id: res.getHeader('X-Request-Id') });
+  else console.error(error);
   res.status(500).json({ error: 'Une erreur interne est survenue. Veuillez reessayer.' });
 }

@@ -1,9 +1,10 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
-import { FileSearch, Flag, ShieldCheck } from 'lucide-react';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
+import { Clock, FileSearch, Flag, Gavel, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { Badge, DemoNotice, EmptyState, ErrorState, Loading, LoginNotice, PageHeader, useApi } from '../components/ui';
-import { api, date, errorMessage } from '../lib/api';
+import { api, date, dateTime, errorMessage } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import '../styles/trust.css';
 
 const targetLabels = {
   project: 'Projet', post: 'Publication', listing: 'Annonce', mission: 'Mission', order: 'Commande', user: 'Profil utilisateur',
@@ -21,7 +22,11 @@ type WorkReport = { summary: string; steps: string; expected: string; observed: 
 type Report = {
   id: string; target_type: TargetType; target_id: string; reason: string;
   status: CaseStatus; decision: string; created_at: string; reporter_name?: string; open_reports?: number;
-  context?: { title?: string; body?: string; status?: string; work_report?: WorkReport | null; delivery_text?: string; payout_recorded?: boolean; settlement_recorded?: boolean } | null;
+  context?: {
+    title?: string; body?: string; status?: string; work_report?: WorkReport | null; delivery_text?: string; payout_recorded?: boolean; settlement_recorded?: boolean;
+    /** Orders only (V4): 'sandbox' | 'live' orders are held in escrow and can be refunded by moderation. */
+    payment_mode?: 'demo' | 'sandbox' | 'live' | null;
+  } | null;
 };
 type AuditEvent = { id: string; actor_name: string | null; action: string; target_type: string; target_id: string; detail: string; created_at: string };
 
@@ -34,7 +39,7 @@ function Policies() {
       <div><h3>Un examen confidentiel</h3><p className="muted">Chaque dossier est visible uniquement par son auteur et la modération, même si les deux parties signalent le même élément. Les parties voient seulement l’état de leur mission ou commande.</p></div>
     </div>
     <DemoNotice />
-    <p className="small muted">Un signalement suspend les missions et commandes encore actives. Une mission déjà versée ou annulée et une commande terminée ou remboursée ne sont pas modifiées. La modération doit choisir une reprise explicite à la clôture du dernier dossier. Aucun remboursement ni transfert réel n’est proposé : les corrections financières et remboursements réels sont hors du périmètre de cette démonstration.</p>
+    <p className="small muted">Un signalement suspend les missions et commandes encore actives. Une mission déjà versée ou annulée et une commande terminée ou remboursée ne sont pas modifiées. La modération doit choisir une reprise explicite à la clôture du dernier dossier. Pour une commande de démonstration, aucun remboursement ni transfert réel n’est effectué. Pour une commande payée et conservée sous séquestre, la modération peut décider le remboursement intégral de l’acheteur depuis le séquestre.</p>
     <div className="row gap-sm"><Link className="button button-secondary" to="/missions">Mes missions</Link><Link className="button button-secondary" to="/marketplace">Marketplace et commandes</Link></div>
   </section>;
 }
@@ -111,7 +116,9 @@ function DecisionForm({ report, onSaved }: { report: Report; onSaved: () => void
   const otherCases = (report.open_reports ?? 1) > 1;
   const needsResolution = closing && disputed && !otherCases;
   const needsRevisionNote = needsResolution && resolution === 'changes_requested';
-  const resolutions = report.target_type === 'mission' ? ['in_progress', 'changes_requested', 'submitted', 'accepted', 'cancelled'] : ['paid', 'delivered'];
+  const escrowed = report.target_type === 'order' && (report.context?.payment_mode === 'sandbox' || report.context?.payment_mode === 'live');
+  const resolutions = report.target_type === 'mission' ? ['in_progress', 'changes_requested', 'submitted', 'accepted', 'cancelled'] : ['paid', 'delivered', ...(escrowed ? ['refunded'] : [])];
+  const refunding = needsResolution && resolution === 'refunded';
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setPending(true); setError('');
     try {
@@ -135,12 +142,15 @@ function DecisionForm({ report, onSaved }: { report: Report; onSaved: () => void
         {resolutions.map((value) => <option key={value} value={value} disabled={
           (['changes_requested', 'submitted', 'accepted'].includes(value) && !report.context?.work_report) ||
           (value === 'in_progress' && !!report.context?.work_report) ||
-          (value === 'delivered' && !report.context?.delivery_text?.trim())
-        }>{stateLabels[value]}</option>)}
+          (value === 'delivered' && !report.context?.delivery_text?.trim()) ||
+          (value === 'refunded' && !!report.context?.settlement_recorded)
+        }>{value === 'refunded' ? 'Rembourser intégralement l’acheteur (séquestre)' : stateLabels[value]}</option>)}
       </select></label>}
     </div>
     {disputed && otherCases && <p className="help-text">D’autres dossiers actifs concernent cet élément ({report.open_reports} au total). Cette clôture le laissera en litige ; la reprise sera choisie lors de la clôture du dernier dossier.</p>}
     {needsResolution && <p className="help-text">La reprise ne verse ni ne rembourse d’argent. Un rapport existant peut être soumis, accepté ou renvoyé pour modifications, mais ne peut pas reprendre comme un travail sans rapport. Une commande livrée exige un texte de livraison. Le classement sans suite exige lui aussi une reprise explicite.</p>}
+    {needsResolution && escrowed && <p className="help-text">Commande payée en mode {report.context?.payment_mode === 'live' ? 'réel' : 'bac à sable'} : « Rembourser intégralement l’acheteur » restitue les fonds du séquestre et clôt la commande, dans la même opération que la décision. En cas d’échec du remboursement, rien n’est enregistré.</p>}
+    {refunding && <p className="tr-notice tr-notice-warning"><ShieldAlert size={16} />Remboursement irréversible : le vendeur ne sera pas payé pour cette commande. Les deux parties sont notifiées ; la motivation reste visible par l’auteur du dossier et la modération.</p>}
     {needsRevisionNote && <div className="stack">
       <label className="field">Modifications attendues — partagées avec les deux participants<textarea value={revisionNote} onChange={(event) => setRevisionNote(event.target.value)} required minLength={10} maxLength={2000} rows={3} disabled={pending} /></label>
       <p className="help-text">Cette consigne apparaîtra dans la mission pour permettre la révision du rapport. Ne divulguez ni l’identité des autres auteurs de signalements ni le contenu confidentiel de leurs dossiers.</p>
@@ -148,7 +158,7 @@ function DecisionForm({ report, onSaved }: { report: Report; onSaved: () => void
     <label className="field">Motivation de la décision<textarea value={decision} onChange={(event) => setDecision(event.target.value)} required minLength={10} maxLength={4000} rows={4} disabled={pending} /></label>
     <p className="help-text">Visible par l’auteur de ce dossier et dans le journal réservé aux administrateurs. Ne divulguez pas les autres auteurs de signalements.</p>
     <ErrorState message={error} />
-    <button className="button button-primary" type="submit" disabled={pending}>{pending ? 'Enregistrement…' : 'Enregistrer la décision'}</button>
+    <button className="button button-primary" type="submit" disabled={pending}>{pending ? 'Enregistrement…' : refunding ? 'Rembourser et enregistrer la décision' : 'Enregistrer la décision'}</button>
   </form>;
 }
 
@@ -169,6 +179,111 @@ const auditActions: Record<string, string> = {
   'moderation.report.created': 'Signalement créé', 'moderation.report.reviewing': 'Examen mis à jour',
   'moderation.report.resolved': 'Dossier résolu', 'moderation.report.dismissed': 'Dossier classé',
 };
+
+type MemberAppeal = { id: string; sanction_id: string; statement: string; status: 'pending' | 'accepted' | 'rejected'; decision_note: string; created_at: string; decided_at: string | null; sla_due_at: string };
+type MemberSanction = {
+  id: string; kind: 'warning' | 'restriction' | 'suspension' | 'ban'; kind_label: string; capability_labels: string[]; login_blocked: boolean;
+  ground_label: string; public_reason: string; starts_at: string; ends_at: string | null; appealable: boolean; automated_detection: boolean;
+  automated_decision: boolean; active: boolean; revoked_at: string | null; revoked_reason: string; created_at: string;
+  appeals: MemberAppeal[]; appeal_deadline: string | null; can_appeal: boolean; appeal_blocker: string | null;
+};
+type Restrictions = { active: MemberSanction[]; history: MemberSanction[]; appeal_sla_days: number; max_appeals: number; redress: string };
+const sanctionTones: Record<MemberSanction['kind'], string> = { warning: 'blue', restriction: 'orange', suspension: 'red', ban: 'red' };
+const appealLabels: Record<MemberAppeal['status'], string> = { pending: 'En cours d’examen', accepted: 'Accepté', rejected: 'Rejeté' };
+const appealTones: Record<MemberAppeal['status'], string> = { pending: 'orange', accepted: 'green', rejected: 'red' };
+
+function AppealForm({ sanction, slaDays, onSent }: { sanction: MemberSanction; slaDays: number; onSent: (message: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const [statement, setStatement] = useState('');
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState('');
+  const length = statement.trim().length;
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setPending(true); setError('');
+    try {
+      await api('/trust/appeals', { method: 'POST', body: JSON.stringify({ sanction_id: sanction.id, statement: statement.trim() }) });
+      setStatement(''); setOpen(false);
+      onSent(`Appel envoyé. Une personne de l’équipe de modération vous répondra sous ${slaDays} jours.`);
+    } catch (failure) { setError(errorMessage(failure)); }
+    finally { setPending(false); }
+  }
+  if (!open) return <div className="tr-actions"><button className="button button-primary button-small" type="button" onClick={() => setOpen(true)}><Gavel size={14} /> Contester cette décision</button></div>;
+  return <form className="tr-form" onSubmit={submit}>
+    <label className="field">Votre contestation
+      <textarea value={statement} onChange={(event) => setStatement(event.target.value)} required minLength={30} maxLength={3000} rows={5} disabled={pending}
+        placeholder="Expliquez pourquoi la décision vous paraît injustifiée et apportez tout élément utile (contexte, appareil ou réseau partagé, erreur…)." />
+    </label>
+    <span className="tr-counter" data-invalid={length > 0 && length < 30}>{length} / 3000 (30 minimum)</span>
+    <p className="help-text">Votre appel sera examiné par une personne, pas par un automatisme. N’incluez pas de mot de passe ni de données bancaires.</p>
+    <ErrorState message={error} />
+    <div className="tr-actions">
+      <button className="button button-primary button-small" type="submit" disabled={pending || length < 30 || length > 3000}>{pending ? 'Envoi…' : 'Envoyer l’appel'}</button>
+      <button className="button button-ghost button-small" type="button" onClick={() => setOpen(false)} disabled={pending}>Annuler</button>
+    </div>
+  </form>;
+}
+
+function MemberSanctionCard({ sanction, slaDays, onSent }: { sanction: MemberSanction; slaDays: number; onSent: (message: string) => void }) {
+  return <article className={`tr-card ${sanction.active ? (sanction.kind === 'warning' ? 'tr-card-warning' : 'tr-card-active') : ''}`}>
+    <div className="tr-card-head">
+      <h3><Badge tone={sanctionTones[sanction.kind]}>{sanction.kind_label}</Badge>{sanction.ground_label}</h3>
+      <div className="tr-badges">
+        {sanction.active ? <Badge tone="red">En vigueur</Badge> : sanction.revoked_at ? <Badge tone="green">Levée</Badge> : <Badge tone="neutral">Terminée</Badge>}
+        {sanction.automated_decision && <Badge tone="purple">Mesure automatique</Badge>}
+      </div>
+    </div>
+    {sanction.kind === 'restriction' && sanction.capability_labels.length > 0 && <div>
+      <p className="small muted">Actions bloquées :</p>
+      <ul className="tr-chips">{sanction.capability_labels.map((label) => <li key={label} className="tr-chip-danger">{label}</li>)}</ul>
+    </div>}
+    {(sanction.kind === 'suspension' || sanction.kind === 'ban') && sanction.active && <p className="small">
+      {sanction.login_blocked ? 'Toutes les actions sont bloquées, y compris la connexion.' : 'Toutes les actions sont bloquées. Vous pouvez toujours consulter la plateforme, cette page et contester la décision.'}
+    </p>}
+    <p className="tr-quote">{sanction.public_reason}</p>
+    <dl className="tr-dl">
+      <dt>Depuis</dt><dd>{dateTime(sanction.starts_at)}</dd>
+      <dt>Fin</dt><dd>{sanction.ends_at ? dateTime(sanction.ends_at) : 'Sans date de fin'}</dd>
+      <dt>Origine</dt><dd>{sanction.automated_decision ? 'Mesure conservatoire automatique, en attente d’examen humain' : sanction.automated_detection ? 'Décision humaine après une détection automatisée' : 'Décision de l’équipe de modération'}</dd>
+      {sanction.revoked_at && <><dt>Levée le</dt><dd>{dateTime(sanction.revoked_at)}{sanction.revoked_reason ? ` — ${sanction.revoked_reason}` : ''}</dd></>}
+      {sanction.appeal_deadline && !sanction.revoked_at && <><dt>Contestable jusqu’au</dt><dd>{dateTime(sanction.appeal_deadline)}</dd></>}
+    </dl>
+    {sanction.appeals.length > 0 && <ul className="tr-timeline" aria-label="Mes appels">{sanction.appeals.map((appeal) => <li key={appeal.id}>
+      <span className="tr-badges"><Badge tone={appealTones[appeal.status]}>{appealLabels[appeal.status]}</Badge><span className="small muted">déposé le {dateTime(appeal.created_at)}</span></span>
+      {appeal.status === 'pending' && <p className="small muted"><Clock size={12} /> Réponse attendue avant le {dateTime(appeal.sla_due_at)}</p>}
+      <p className="tr-quote">{appeal.statement}</p>
+      {appeal.decision_note && <p className="small"><strong>Réponse{appeal.decided_at ? ` du ${dateTime(appeal.decided_at)}` : ''} :</strong> {appeal.decision_note}</p>}
+    </li>)}</ul>}
+    {sanction.can_appeal ? <AppealForm sanction={sanction} slaDays={slaDays} onSent={onSent} />
+      : sanction.appeal_blocker && !sanction.revoked_at && <p className="help-text">{sanction.appeal_blocker}</p>}
+  </article>;
+}
+
+function MyRestrictions() {
+  const restrictions = useApi<Restrictions>('/trust/me/restrictions');
+  const [notice, setNotice] = useState('');
+  const location = useLocation();
+  const data = restrictions.data;
+  useEffect(() => {
+    if (data && location.hash === '#restrictions') document.getElementById('restrictions')?.scrollIntoView({ block: 'start' });
+  }, [data, location.hash]);
+  const sent = (message: string) => { setNotice(message); restrictions.reload(); };
+  return <section id="restrictions" className="card card-body tr-section" aria-labelledby="restrictions-title">
+    <h2 id="restrictions-title"><ShieldAlert size={21} /> Mes restrictions &amp; appels</h2>
+    {notice && <p className="alert alert-success" role="status">{notice}</p>}
+    {restrictions.loading ? <Loading /> : restrictions.error ? <ErrorState message={restrictions.error} /> : data && <>
+      {data.active.length ? <>
+        <p className="muted">Chaque mesure indique ses motifs, son fondement et sa durée. Vous pouvez la contester {data.max_appeals} fois au maximum ; la modération s’engage à répondre sous {data.appeal_sla_days} jours.</p>
+        <div className="tr-cards">{data.active.map((sanction) => <MemberSanctionCard key={sanction.id} sanction={sanction} slaDays={data.appeal_sla_days} onSent={sent} />)}</div>
+      </> : <p className="tr-notice tr-notice-ok"><ShieldCheck size={16} />Aucune restriction en vigueur sur votre compte.</p>}
+      {data.history.length > 0 && <details className="tr-history">
+        <summary>Historique ({data.history.length})</summary>
+        <div className="tr-cards">{data.history.map((sanction) => <MemberSanctionCard key={sanction.id} sanction={sanction} slaDays={data.appeal_sla_days} onSent={sent} />)}</div>
+      </details>}
+      {(data.active.length > 0 || data.history.length > 0) && <p className="tr-intro">{data.redress}</p>}
+    </>}
+  </section>;
+}
 
 function TrustWorkspace({ admin }: { admin: boolean }) {
   const [params] = useSearchParams();
@@ -210,6 +325,9 @@ export default function TrustPage() {
   return <div className="stack">
     <PageHeader eyebrow="Confiance & transparence" title="Un espace pour collaborer sereinement" description="Signaler un problème, suivre son traitement et comprendre les règles de modération." />
     <Policies />
-    {loading ? <Loading /> : error ? <ErrorState message={error} /> : user ? <TrustWorkspace key={`${user.id}:${user.role}`} admin={user.role === 'admin'} /> : <LoginNotice />}
+    {loading ? <Loading /> : error ? <ErrorState message={error} /> : user ? <>
+      <MyRestrictions key={user.id} />
+      <TrustWorkspace key={`${user.id}:${user.role}`} admin={user.role === 'admin'} />
+    </> : <LoginNotice />}
   </div>;
 }

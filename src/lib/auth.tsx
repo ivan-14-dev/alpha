@@ -1,9 +1,18 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { api, errorMessage } from './api';
 
+export type LegalDocumentKey = 'terms' | 'privacy' | 'payments' | 'tester_charter' | 'seller_terms';
+
 export interface User {
   id: string; name: string; email: string; title: string; bio: string;
   skills: string; avatar_color: string; role: 'member' | 'admin'; created_at: string;
+  /** Account security flags returned by /api/auth/me (V4). Optional so older fixtures keep compiling. */
+  email_verified?: boolean;
+  mfa_enabled?: boolean;
+  has_password?: boolean;
+  pending_legal?: LegalDocumentKey[];
+  /** True when the admin MFA policy suspends this administrator's rights until MFA is enabled. */
+  admin_mfa_required?: boolean;
 }
 interface AuthState {
   user: User | null; loading: boolean; error: string;

@@ -142,7 +142,7 @@ test('Alpha HTTP integration: real sessions, private resources, and demo busines
   const motivation = { motivation: 'I can test the complete desktop flow and provide reproducible accessibility feedback.' };
 
   await t.test('sessions are authenticated, rotated, expired, and revoked; unsafe mutations are rejected', async () => {
-    assert.deepEqual(await api(null, '/health'), { status: 'ok', payment_mode: 'demo' });
+    assert.deepEqual(await api(null, '/health'), { status: 'ok', version: '0.4.0', payment_mode: 'demo' });
     assert.deepEqual(await api(null, '/auth/me'), { user: null });
     assert.equal((await api<{ user: User }>(owner, '/auth/me')).user.id, owner.id);
     await api(null, '/payments/summary', 401);
