@@ -94,7 +94,9 @@ export function errorHandler(error: unknown, _req: Request, res: Response, _next
     return;
   }
   if (error instanceof HttpError) {
-    res.status(error.status).json({ error: error.message });
+    // Trust restrictions carry a structured statement of reasons (DSA art. 17) so the client can link to the appeal.
+    const restriction = (error as HttpError & { restriction?: unknown }).restriction;
+    res.status(error.status).json(restriction ? { error: error.message, restriction } : { error: error.message });
     return;
   }
   if (error instanceof SyntaxError && 'body' in error) {
