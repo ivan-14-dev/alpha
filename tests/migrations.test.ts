@@ -45,8 +45,11 @@ function legacyDatabase(path = ':memory:') {
 }
 
 const retainedTables = ['users', 'sessions', 'organizations', 'organization_members', 'projects', 'campaigns', 'applications', 'missions', 'test_reports', 'transactions', 'comments', 'post_likes', 'conversations', 'conversation_members', 'messages'];
+// Columns added by later additive migrations; their backfilled values are asserted explicitly below.
+const additiveColumns: Record<string, string[]> = { users: ['email_verified_at'], campaigns: ['payment_mode'] };
 function snapshot(database: DatabaseSync) {
-  return Object.fromEntries(retainedTables.map((table) => [table, database.prepare(`SELECT ${table === 'sessions' ? 'token_hash,user_id,expires_at' : '*'} FROM ${table} ORDER BY rowid`).all()]));
+  return Object.fromEntries(retainedTables.map((table) => [table, database.prepare(`SELECT ${table === 'sessions' ? 'token_hash,user_id,expires_at' : '*'} FROM ${table} ORDER BY rowid`).all()
+    .map((row) => Object.fromEntries(Object.entries(row).filter(([column]) => !additiveColumns[table]?.includes(column))))]));
 }
 function columns(database: DatabaseSync, table: 'posts' | 'reviews') {
   return database.prepare(`PRAGMA table_info(${table})`).all().map((column) => column.name);
@@ -62,6 +65,8 @@ test('V1 data upgrades atomically without fabricating ratings or changing identi
     assert.deepEqual(snapshot(database), before);
     assert.deepEqual({ ...database.prepare('SELECT * FROM reviews').get() }, { ...originalReview, communication_rating: null, quality_rating: null });
     assert.deepEqual({ ...database.prepare('SELECT * FROM posts').get() }, { ...originalPost, project_id: null });
+    assert.equal(database.prepare('SELECT COUNT(*) AS count FROM users WHERE email_verified_at IS NOT created_at').get()!.count, 0);
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM campaigns WHERE payment_mode <> 'demo'").get()!.count, 0);
     assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
     assert.equal(database.prepare('SELECT COUNT(*) AS count FROM schema_migrations').get()!.count, migrations.length);
     for (const table of ['user_follows', 'project_follows', 'organization_invitations', 'project_tasks']) {
