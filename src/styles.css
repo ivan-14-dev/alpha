@@ -55,6 +55,7 @@ small{font-size:11px}
 .topbar-actions{display:flex;align-items:center;gap:19px}
 .demo-pill{display:flex;align-items:center;gap:7px;color:#8d879a;font-size:8px;letter-spacing:1px;font-weight:600}
 .demo-pill>span{height:5px;width:5px;border-radius:50%;background:#a99acb}
+.demo-pill.is-live{color:#2f8f5b}.demo-pill.is-live>span{background:#2f8f5b}
 .notification-button{position:relative;color:#848190}
 .notification-button i{position:absolute;right:2px;top:0;width:6px;height:6px;border:1.5px solid white;background:var(--purple);border-radius:50%}
 .topbar-separator{height:24px;width:1px;background:var(--line)}
