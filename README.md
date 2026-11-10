@@ -1,10 +1,27 @@
-# Alpha — V3
+# Alpha — V4
 
-Une plateforme francophone pour partager des projets technologiques, organiser des tests rémunérés **en simulation**, trouver des collaborateurs et échanger avec une communauté.
+Une plateforme francophone pour partager des projets technologiques, organiser des tests rémunérés, vendre des logiciels, services et idées, trouver des collaborateurs et échanger avec une communauté.
 
-Alpha est une application locale persistante : interface React 19 et TypeScript, Vite, API Express 5 et SQLite via `node:sqlite`. Les treize modules métier partagent une base de données ; ce ne sont pas des microservices.
+Alpha est un monolithe modulaire : interface React 19 et TypeScript, Vite, API Express 5 et SQLite via `node:sqlite`. Les modules métier partagent une base de données ; ce ne sont pas des microservices. La V4 apporte le socle de production : paiements réels configurables, comptes sécurisés, fichiers analysés, bac à sable d'exécution, intégrations, temps réel, anti-abus, RGPD, CI et déploiement Docker.
 
-> **Tous les financements, achats, gains et versements sont simulés.** Aucun prestataire de paiement n'est connecté, aucun argent réel ne circule et aucun retrait réel n'est disponible. Cette version ne doit pas être présentée comme une plateforme prête pour la production.
+> **Le mode de paiement par défaut reste `demo` : tout est simulé tant qu'un administrateur n'a pas configuré un prestataire et activé le mode réel.** Avant d'encaisser de l'argent réel, lire [Avant une mise en production](docs/architecture.md#avant-une-mise-en-production) : textes légaux à faire valider, agréments éventuels selon les pays servis, recette de chaque prestataire.
+
+## Nouveautés de la V4
+
+- **Paiements réels** : Stripe Connect, Flutterwave, CamPay, MTN MoMo, Orange Money, Wave et Kratos Pay, configurables (clés, devises, pays, activation) depuis **Console admin › Paiements**. Modes `demo`, `sandbox` et `live`, intentions de paiement, webhooks vérifiés et reconfirmés, séquestre, remboursements et rapprochement automatique.
+- **Portefeuille et conformité** : solde multi-devises, KYC, retraits vers Mobile Money ou compte bancaire, factures et paramètres fiscaux.
+- **Comptes** : vérification de l'adresse e-mail, mot de passe oublié, double authentification (TOTP et codes de secours), connexion GitHub et Google.
+- **Fichiers sécurisés** : téléversement chiffré au repos, analyse antivirus ClamAV, quarantaine et liens temporaires ; pièces jointes de campagnes, missions, commandes et conversations.
+- **Bac à sable** : exécution d'un build de campagne dans un conteneur Docker jetable et isolé, avec journal partagé entre porteur et testeurs.
+- **Intégrations** : OAuth GitHub, GitLab et Figma, webhooks entrants signés et webhooks sortants HMAC.
+- **Temps réel** : messages et notifications en direct, indicateur de saisie, accusés de lecture, e-mails, résumé quotidien et notifications push (PWA).
+- **Confiance** : détection de multi-comptes, collusion et fraude, sanctions graduées, appels et exposé des motifs (DSA).
+- **RGPD** : export des données, suppression du compte avec délai de grâce, consentements versionnés, registre des traitements et modèles de documents légaux.
+- **Exploitation** : image Docker, pile Compose (Caddy HTTPS, ClamAV), alertes Prometheus, CI GitHub Actions, sauvegardes et restauration, métriques, console système et export PostgreSQL vérifié.
+
+### Mettre à jour une installation V3
+
+Sauvegarder la base (`npm run backup`, ou copie à froid du fichier SQLite), puis relancer : les migrations 004 à 014 s'appliquent automatiquement au démarrage. Les comptes existants sont considérés comme vérifiés, les campagnes et commandes existantes restent en mode `demo` et aucun prestataire n'est activé. Promouvoir ensuite un administrateur (`npm run admin:promote -- <email>`) pour accéder à la console.
 
 ## Nouveautés de la V3
 
@@ -15,7 +32,7 @@ Alpha est une application locale persistante : interface React 19 et TypeScript,
 
 Les paiements demeurent fictifs. La recherche ne parcourt ni les projets privés, ni les rapports, messages ou livraisons. Une ancienne livraison est conservée dans l'historique sans lui inventer une date de livraison.
 
-### Déjà disponibles depuis la V2
+### Disponibles depuis la V2
 
 - **Mon réseau** : suivre des membres et des projets publics, retrouver ses abonnements et un fil personnalisé dans les communautés.
 - **Actualités de projet** : publier des avancées liées à un projet public. Passer le projet en privé retire ces publications de tous les fils, commentaires et interactions publics.
@@ -31,7 +48,7 @@ Les comptes, sessions, messages, projets, missions et opérations fictives exist
 
 Les migrations appliquées sont enregistrées avec une empreinte de leur contenu. Ne pas modifier un fichier SQL déjà appliqué : ajouter une nouvelle migration. Une migration en échec est annulée et empêche le démarrage, sans prétendre que la mise à jour a réussi. Le retour à un ancien schéma n'est pas automatisé.
 
-## Démarrer en quelques minutes
+## Démarrer en quelques minutes (développement)
 
 Prérequis : **Node.js 22.13 ou supérieur** et npm. Exécuter les commandes à la racine du dépôt.
 
@@ -81,6 +98,11 @@ Le fichier `.env` local est chargé par Node côté serveur et lors du seed ; le
 | `APP_ORIGIN` | Origine exacte autorisée pour les requêtes de modification, par exemple `http://127.0.0.1:5173` en développement. Ne pas ajouter de `/` final. |
 | `DEMO_PASSWORD` | Mot de passe facultatif des comptes créés par le seed. Choisir une valeur longue et unique, de 10 à 128 caractères. Ne crée aucun compte au démarrage normal. |
 | `NODE_ENV` | `production` active notamment le cookie de session `Secure` et impose `APP_ORIGIN` ; nécessite HTTPS côté navigateur. Ne pas l'utiliser pour l'essai local en HTTP. |
+| `ALPHA_SECRETS_KEY` | Clé de chiffrement des secrets saisis dans la console (clés de prestataires, OAuth…). Obligatoire en production et pour le mode de paiement réel. |
+| `SMTP_URL`, `MAIL_FROM` | Envoi des e-mails (vérification, récupération, notifications). Sans SMTP en développement, les e-mails sont journalisés. |
+| `CLAMAV_HOST`, `ALPHA_SANDBOX_*` | Antivirus et hôte Docker du bac à sable. Voir [le guide de déploiement](docs/deployment.md). |
+
+La liste complète, commentée, se trouve dans `.env.example`. Les réglages non secrets (prestataires, quotas, seuils anti-abus…) se modifient dans la console d'administration.
 
 `APP_ORIGIN` participe à la protection contre les requêtes intersites (CSRF), avec un en-tête applicatif envoyé par le client. Si la connexion échoue avec « Origine non autorisée », vérifier l'adresse utilisée dans le navigateur : `localhost` et `127.0.0.1` sont des origines différentes. En l'absence de configuration, les origines locales usuelles des ports 5173 et 3001 sont acceptées.
 
@@ -95,7 +117,46 @@ APP_ORIGIN=http://127.0.0.1:3001 npm start
 
 Ouvrir alors `http://127.0.0.1:3001`. Express sert le dossier `dist` et l'API sur la même origine. `npm start` n'effectue ni build ni seed ; le serveur TypeScript est lancé avec `tsx`.
 
-Pour un déploiement derrière un reverse proxy HTTPS, fournir l'origine publique exacte et `NODE_ENV=production`. Cela ne remplace pas les travaux de durcissement décrits dans [l'architecture](docs/architecture.md#avant-une-mise-en-production).
+Pour un déploiement derrière un reverse proxy HTTPS, fournir l'origine publique exacte et `NODE_ENV=production`, ou utiliser la pile Docker ci-dessous.
+
+## Mise en production
+
+La pile `deploy/compose.yaml` lance l'application, Caddy (HTTPS automatique) et ClamAV ; Mailpit (profil `dev`) et PostgreSQL (profil `postgres`, pour l'export) sont facultatifs. Une configuration Prometheus avec règles d'alerte est fournie dans `deploy/prometheus`. Le guide pas à pas est dans [docs/deployment.md](docs/deployment.md) ; les procédures d'exploitation (incidents, restauration, rotation des clés, alertes) dans [docs/operations.md](docs/operations.md).
+
+```bash
+cp deploy/.env.example deploy/.env      # domaine, ALPHA_SECRETS_KEY, SMTP…
+docker compose -f deploy/compose.yaml up -d --build
+docker compose -f deploy/compose.yaml exec app npm run admin:promote -- vous@example.org
+```
+
+| Commande | Usage |
+| --- | --- |
+| `npm run backup` | Sauvegarde cohérente de la base (`-- --list` pour lister) ; la tâche `ops.backup` en réalise aussi chaque jour. |
+| `npm run restore -- <fichier>` | Restauration d'une sauvegarde, application arrêtée. |
+| `npm run admin:promote -- <email>` | Donne le rôle administrateur à un compte existant. |
+| `npm run db:export:postgres` | Export vérifié vers PostgreSQL (le runtime V4 reste sur SQLite). |
+| `npm run test:postgres` | Tests de l'export contre un PostgreSQL réel (Docker ou `ALPHA_PG_URL`). |
+
+`/api/health` indique l'état du processus et le mode de paiement ; `/api/system/ready` vérifie base, migrations et secrets ; `/api/system/metrics` expose les métriques Prometheus (protégées par `METRICS_TOKEN`). La CI (`.github/workflows/ci.yml`) exécute typecheck, tests, build, tests PostgreSQL et construction de l'image.
+
+### Documentation V4
+
+| Domaine | Document |
+| --- | --- |
+| Comptes, MFA, OAuth | [docs/v4/accounts.md](docs/v4/accounts.md) |
+| Paiements et séquestre | [docs/v4/payments.md](docs/v4/payments.md) |
+| Prestataires de paiement | [docs/v4/payment-providers.md](docs/v4/payment-providers.md) |
+| Portefeuille, KYC, factures | [docs/v4/compliance.md](docs/v4/compliance.md) |
+| Fichiers et antivirus | [docs/v4/files.md](docs/v4/files.md) |
+| Bac à sable | [docs/v4/sandbox.md](docs/v4/sandbox.md) |
+| Intégrations et webhooks | [docs/v4/integrations.md](docs/v4/integrations.md) |
+| Temps réel et notifications | [docs/v4/realtime.md](docs/v4/realtime.md) |
+| Confiance et anti-abus | [docs/v4/trust.md](docs/v4/trust.md) |
+| RGPD | [docs/v4/privacy.md](docs/v4/privacy.md) et modèles dans [docs/legal](docs/legal) |
+| Exploitation | [docs/v4/ops.md](docs/v4/ops.md) |
+| PostgreSQL | [docs/postgresql.md](docs/postgresql.md) |
+
+Les documents de `docs/legal` sont des **modèles** à faire relire par un juriste avant publication.
 
 ## Ce que l'on peut faire
 
@@ -103,7 +164,7 @@ Pour un déploiement derrière un reverse proxy HTTPS, fournir l'origine publiqu
 2. **Tests** : créer une campagne, recueillir des candidatures, sélectionner des testeurs et suivre leurs rapports structurés.
 3. **Communautés** : rejoindre des groupes publics, publier, commenter et réagir.
 4. **Marketplace** : proposer des logiciels, composants, prototypes, services ou dossiers de concepts, puis suivre une commande simulée.
-5. **Paiements** : financer un budget fictif, réserver les récompenses, déclencher un versement de démonstration et consulter son historique.
+5. **Paiements** : financer un budget (fictif en mode `demo`, réel via un prestataire en mode `live`), réserver les récompenses, verser, rembourser et consulter son historique ; retirer ses gains depuis le portefeuille après KYC.
 6. **Profils et organisations** : présenter ses compétences et réunir des membres autour de projets.
 7. **Réputation** : consulter et laisser des avis entre participants d'une mission ayant atteint l'état payé en démonstration.
 8. **Communication** : échanger dans des conversations privées et consulter ses notifications internes.
@@ -113,7 +174,7 @@ Pour un déploiement derrière un reverse proxy HTTPS, fournir l'origine publiqu
 12. **Atelier d'équipe** : organiser les tâches d'un projet entre ses collaborateurs autorisés, indépendamment des missions de test rémunérées.
 13. **Découverte et favoris** : rechercher entre les modules publics et conserver une sélection personnelle, distincte des abonnements sociaux.
 
-Les intégrations sont des **liens enregistrés**, pas des connexions OAuth ni des synchronisations. Les rapports contiennent du texte et, éventuellement, une URL de preuve déjà hébergée. Alpha n'héberge ni ne lance les logiciels à tester et ne propose pas de téléversement de pièces jointes.
+Depuis la V4, les intégrations peuvent aussi être des connexions OAuth avec webhooks, les rapports et livraisons acceptent des pièces jointes analysées, et un build de campagne peut être exécuté dans le bac à sable. Les parcours ci-dessous restent valables en mode `demo`.
 
 Les offres de marketplace portent sur des **droits non exclusifs** précisés par le vendeur, pas sur un transfert automatique de propriété intellectuelle. La description des livrables est publique ; le texte de livraison d'une commande est privé aux participants, avec accès contextuel de la modération en cas de signalement.
 
@@ -154,7 +215,7 @@ Sur une base nouvellement initialisée en V2, Alex reçoit déjà une invitation
 
 Sur une base nouvellement initialisée en V3, Camille a commandé une revue UX à Alex et demandé des précisions. Avec Alex, ouvrir **Marketplace → Achats et ventes**, consulter la commande et livrer une version corrigée ; avec Camille, vérifier puis accepter. Alex dispose aussi de trois favoris d'exemple. Une base existante n'est pas alimentée automatiquement.
 
-**Compte** : ouvrir **Mon compte** pour consulter les sessions actives et révoquer une autre connexion. Pour vérifier ce parcours, utiliser deux profils de navigateur distincts ; deux onglets ordinaires partagent le même cookie. Le changement de mot de passe exige le mot de passe actuel et déconnecte les anciennes sessions. Il ne remplace pas une récupération de compte par email, qui reste absente.
+**Compte** : ouvrir **Mon compte** pour consulter les sessions actives et révoquer une autre connexion. Pour vérifier ce parcours, utiliser deux profils de navigateur distincts ; deux onglets ordinaires partagent le même cookie. Le changement de mot de passe exige le mot de passe actuel et déconnecte les anciennes sessions. La récupération par e-mail et la double authentification sont disponibles depuis la V4.
 
 **Clients API existants** : les mutations de livraison et d'acceptation des commandes exigent désormais le champ `version` renvoyé par la commande. Après un conflit HTTP 409, relire la commande et vérifier son contenu avant de confirmer à nouveau ; ne pas renvoyer automatiquement une acceptation sur une nouvelle version.
 
@@ -170,17 +231,25 @@ npm run build
 
 ```text
 src/pages/          Écrans des modules métier
+src/admin/          Console d'administration (/admin)
 src/components/     Composants d'interface partagés
-src/lib/            Client API et contexte de session
-server/modules/     Treize routeurs métier
+src/lib/            Client API, session et temps réel
+server/modules/     Routeurs métier (V1–V4)
+server/platform/    Réglages, secrets, tâches, e-mails, quotas, garde-fous
+server/payments/    Modes, journal, intentions, séquestre et prestataires
+server/accounts/ server/files/ server/sandbox/ server/integrations/
+server/realtime/ server/compliance/ server/trust/ server/privacy/ server/ops/
+server/pg/          Export et vérification PostgreSQL
 server/auth.ts      Comptes et sessions
 server/core.ts      Autorisations et utilitaires partagés
-server/finance.ts   Règles des budgets et versements simulés
+server/finance.ts   Règles des budgets et versements de démonstration
 server/schema.sql   Socle SQLite V1
-server/migrations/  Migrations SQL versionnées V2 et V3
+server/migrations/  Migrations SQL versionnées (002 à 014)
 server/migrations.ts  Application transactionnelle et vérification des empreintes
 server/seed.ts      Données fictives facultatives
-docs/architecture.md  Frontières, cycles de vie et limites
+scripts/            Sauvegarde, restauration, promotion admin, export PostgreSQL
+deploy/             Compose, Caddy, ClamAV, Prometheus
+docs/               Architecture, déploiement, exploitation, modules V4, modèles légaux
 ```
 
-Les comptes, messages, rapports et livraisons restent dans la base locale. Ne pas y déposer de secrets ou de données sensibles : cette version n'inclut ni messagerie chiffrée de bout en bout, ni analyse de fichiers, ni récupération de mot de passe par email. Pour les choix de conception et le travail nécessaire avant ouverture au public, consulter [l'architecture détaillée](docs/architecture.md).
+Les messages, rapports et livraisons sont stockés en clair dans la base ; les fichiers et les secrets sont chiffrés au repos. La messagerie n'est pas chiffrée de bout en bout. Pour les choix de conception et le travail restant avant une ouverture au public, consulter [l'architecture détaillée](docs/architecture.md).

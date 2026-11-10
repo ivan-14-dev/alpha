@@ -2,29 +2,33 @@
 
 ## Périmètre et choix de départ
 
-Alpha est un **monolithe modulaire local**, conçu pour parcourir réellement la chaîne projet → campagne → candidature → rapport → validation → versement simulé, ainsi que les échanges communautaires et les commandes de marketplace.
+Alpha est un **monolithe modulaire**, conçu pour parcourir réellement la chaîne projet → campagne → candidature → rapport → validation → versement, ainsi que les échanges communautaires et les commandes de marketplace. La V4 ajoute le socle de production : paiements réels configurables, comptes durcis, fichiers et bac à sable, intégrations, temps réel, anti-abus, RGPD et exploitation (voir [Modules V4](#modules-v4--socle-de-production)).
 
 - **Interface** : React 19, TypeScript, React Router et Vite ; textes et parcours en français.
 - **API** : Express 5, routeurs métier sous `/api`, validation des entrées avec Zod.
 - **Persistance** : `node:sqlite`, une base SQLite locale, des clés étrangères, des contraintes et des transactions SQL synchrones.
-- **Identité** : comptes locaux et sessions persistantes par cookie ; pas d'OAuth.
-- **Finance** : écritures de démonstration uniquement, sans prestataire externe.
+- **Identité** : comptes locaux et sessions persistantes par cookie ; depuis la V4, vérification d'adresse, récupération du mot de passe, double authentification TOTP et connexion GitHub / Google.
+- **Finance** : mode `demo` par défaut (écritures fictives, comportement V3) ; modes `sandbox` et `live` via des prestataires agréés configurés dans la console d'administration.
+- **Tâches de fond** : planificateur interne (`server/platform/jobs.ts`) exécuté dans le processus de l'API ; une seule instance doit l'exécuter.
 
 ```text
 Navigateur
   └─ Interface React
        └─ /api, cookie de session et en-tête applicatif
             └─ Express : contrôle d'origine, authentification, autorisation
-                 ├─ 13 routeurs métier
-                 ├─ helpers partagés : finance, notifications, audit
-                 └─ SQLite : une base persistante
+                 ├─ 13 routeurs métier V1–V3 + 7 routeurs V4
+                 ├─ plateforme : réglages, secrets chiffrés, journal, événements, e-mails, quotas, garde-fous
+                 ├─ tâches planifiées : e-mails, antivirus, rapprochement PSP, webhooks, RGPD, sauvegardes…
+                 ├─ SQLite : une base persistante (WAL)
+                 └─ services externes facultatifs : PSP, SMTP, ClamAV, hôte Docker du bac à sable,
+                    GitHub / GitLab / Figma / Google, Web Push
 ```
 
 En développement, Vite écoute sur `127.0.0.1:5173` et relaie `/api` vers Express sur `127.0.0.1:3001`. Après compilation, Express sert `dist` et l'API sur le même port. Les commandes et variables sont détaillées dans le [README](../README.md).
 
 Les pages métier sont chargées à la demande par route, avec un état de chargement et un écran de récupération en cas d'échec. Le tableau de bord reste dans le chargement initial.
 
-Il n'y a pas de microservices, de bus d'événements, de worker, de file de tâches ni de base PostgreSQL dans cette version. Les appels SQLite synchrones et le processus unique sont adaptés à cette première installation locale, pas à une promesse de montée en charge horizontale.
+Il n'y a pas de microservices. La V4 ajoute un bus d'événements en mémoire et une file de tâches persistée dans SQLite, exécutés dans le même processus. Le runtime reste sur SQLite synchrone : la V4 fournit un export PostgreSQL vérifié et le plan de bascule asynchrone de la V5 ([docs/postgresql.md](postgresql.md)). Une instance unique, derrière un reverse proxy HTTPS, est la topologie prise en charge ; elle ne constitue pas une promesse de montée en charge horizontale.
 
 ## Treize modules et responsabilité des données
 
@@ -58,6 +62,29 @@ Exemples de coopération assumée :
 
 Cette organisation facilite une évolution progressive ; elle ne garantit pas une extraction immédiate de chaque module en service indépendant.
 
+## Modules V4 : socle de production
+
+Chaque module V4 possède ses fichiers serveur, sa migration, ses écrans et sa documentation détaillée. Les secrets (clés de prestataires, OAuth, SMTP…) sont chiffrés au repos avec `ALPHA_SECRETS_KEY` et se configurent depuis la **console d'administration** (`/admin`) ; les réglages non secrets y sont modifiables et audités.
+
+| Module / préfixe API | Responsabilité | Migration | Documentation |
+| --- | --- | --- | --- |
+| Comptes — `/api/auth` | Vérification d'adresse, mot de passe oublié, TOTP et codes de secours, OAuth GitHub / Google, consentement légal | 005 | [accounts](v4/accounts.md) |
+| Fichiers — `/api/files` | Téléversement chiffré au repos, quarantaine, ClamAV, liens temporaires, quotas | 006 | [files](v4/files.md) |
+| Paiements — `/api/payments` | Intentions de paiement, webhooks vérifiés, séquestre, remboursements, rapprochement, console des prestataires | 007, 014 | [payments](v4/payments.md), [prestataires](v4/payment-providers.md) |
+| Conformité — `/api/compliance` | Portefeuille, KYC, retraits, factures et fiscalité | 008 | [compliance](v4/compliance.md) |
+| Temps réel — `/api/realtime` | Flux SSE, saisie en cours, accusés de lecture, préférences, e-mails, résumé quotidien, Web Push | 009 | [realtime](v4/realtime.md) |
+| Bac à sable — `/api/sandbox` | Exécution d'un build dans un conteneur Docker jetable, sans réseau, avec journal partagé | 010 | [sandbox](v4/sandbox.md) |
+| Intégrations — `/api/integrations` | OAuth GitHub / GitLab / Figma, webhooks entrants signés, webhooks sortants HMAC avec protection SSRF | 011 | [integrations](v4/integrations.md) |
+| Confiance — `/api/trust` | Signaux hachés, détecteurs (multi-comptes, collusion, fraude), sanctions graduées, appels, exigences DSA | 012 | [trust](v4/trust.md) |
+| Vie privée — `/api/privacy` | Export, suppression avec délai de grâce, consentements versionnés, registre et conservation | 013 | [privacy](v4/privacy.md) |
+| Système — `/api/system` | Disponibilité, métriques Prometheus, tâches, sauvegardes, diagnostic de l'environnement | — | [ops](v4/ops.md), [déploiement](deployment.md), [exploitation](operations.md) |
+
+**Modes de paiement.** `demo` (défaut) conserve les écritures fictives de la V3. `sandbox` utilise les environnements de test des prestataires. `live` exige une confirmation saisie, `APP_ORIGIN` en HTTPS, `ALPHA_SECRETS_KEY` et au moins un prestataire valide. Une campagne ou une commande est liée au mode de son premier financement et ne mélange jamais fonds fictifs et réels. Prestataires livrés : Stripe Connect, Flutterwave, CamPay, MTN MoMo, Orange Money, Wave et Kratos Pay, plus un simulateur. Un webhook n'est jamais cru sur parole : l'état est reconfirmé auprès du prestataire (`status()`), et le rapprochement périodique relance les paiements en attente.
+
+**Garde-fous transverses.** `capabilityMiddleware` applique les restrictions de compte (lecture seule, interdiction de payer ou de retirer…) à toutes les routes, en laissant toujours accessibles la connexion, les appels, l'espace RGPD et les webhooks. Les quotas sont persistés en base (`server/platform/rateLimit.ts`). Les erreurs liées à une restriction renvoient `{error, restriction}` pour que l'interface explique la mesure et propose un appel.
+
+**Tâches planifiées.** `mail.deliver`, `push.deliver`, `realtime.digest`, `files.scan`, `files.cleanup`, `files.rekey`, rapprochement des paiements, `compliance.payouts`, `compliance.invoices`, `integrations.deliver`, `integrations.purge`, `sandbox.dispatch`, `sandbox.cleanup`, `trust.detect`, `trust.purge`, `privacy.exports`, `privacy.erasure`, `privacy.retention`, `accounts.purge`, `rate-limit.purge` et `ops.backup`. **Console admin › Système › Tâches** affiche leur dernier état. Les instances supplémentaires doivent démarrer avec `ALPHA_JOBS=off`.
+
 ## Persistance et cohérence
 
 `server/db.ts` ouvre `DATABASE_PATH`, par défaut `./data/alpha.sqlite`, active les clés étrangères, le journal WAL et un délai d'attente de verrou de cinq secondes. Le socle V1 est créé avec des instructions `CREATE ... IF NOT EXISTS`, puis `server/migrations.ts` applique les migrations manquantes sous un verrou transactionnel.
@@ -66,13 +93,15 @@ Les modifications liées sont regroupées dans des transactions `BEGIN IMMEDIATE
 
 Les contraintes complètent les contrôles métier : candidature unique par campagne et testeur, mission unique par candidature, rapport unique par mission, avis unique par auteur et mission, et index uniques sur le versement d'une mission ainsi que les écritures d'achat et de vente d'une commande.
 
-Les montants sont des **entiers en centimes**, pas des nombres flottants. Le champ `transactions.mode` est contraint à `demo`. Le bilan affiché n'est ni un compte bancaire ni un portefeuille utilisable.
+Les montants sont des **entiers en unités mineures** (centimes ; unité entière pour les devises sans décimale comme le XAF ou le XOF), pas des nombres flottants. Le registre V1–V3 `transactions` reste en mode `demo`. Depuis la V4, les flux réels passent par `payment_intents`, le journal financier en partie double et le portefeuille du module conformité (migrations 007 et 008).
 
 Le seed est explicite et facultatif : il ajoute des données fictives uniquement si aucun compte n'existe. Un lancement normal ne crée pas de compte administrateur ni de mot de passe connu.
 
 Depuis la V2, `schema_migrations` conserve la version, le nom, l'empreinte SHA-256 du SQL et la date d'application. La migration `002-network.sql` ajoute les relations sociales, invitations, tâches, le rattachement public des publications à un projet et les notes détaillées facultatives. Elle ne modifie pas les données métier V1. Un second démarrage ne la rejoue pas. Une empreinte incohérente ou une version inconnue bloque explicitement le démarrage ; un échec SQL annule l'ensemble de la migration. Toute évolution suivante doit utiliser une nouvelle migration plutôt que modifier le SQL déjà appliqué. Un retour arrière destructif n'est pas fourni.
 
 La migration `003-professional.sql` ajoute les favoris, le versionnement et l'historique des commandes, ainsi que des identifiants publics de session. Les valeurs existantes, y compris les cookies encore valides, sont conservées. Les dates historiques absentes restent inconnues ; aucune opération financière n'est créée par la migration.
+
+Les migrations `004` à `014` ajoutent le socle V4 : réglages et secrets, file de tâches, comptes, fichiers, paiements, conformité, temps réel, bac à sable, intégrations, confiance, vie privée et l'état `refunded` de l'historique des commandes. Elles sont additives : les comptes existants sont considérés comme vérifiés et les campagnes existantes restent en mode `demo`. Sauvegarder la base (`npm run backup`) avant la mise à jour.
 
 ## Cycles de vie
 
@@ -172,7 +201,7 @@ La publication d'un concept ne prouve ni sa nouveauté, ni sa protection, ni les
 
 Les mots de passe sont dérivés avec `scrypt` et un sel aléatoire. Le cookie contient un jeton aléatoire ; seul son condensat SHA-256 est stocké avec l'expiration de session. Les sessions durent sept jours. Le cookie est `HttpOnly`, `SameSite=Lax`, et `Secure` lorsque `NODE_ENV=production`.
 
-La V3 expose au titulaire une liste paginée de ses sessions actives avec un identifiant public opaque distinct du jeton et de son condensat. Les sessions héritées gardent une date de création inconnue. Aucun suivi d'adresse IP ou d'appareil n'est ajouté. Le titulaire peut révoquer une autre session ou toutes les autres ; la session courante utilise le bouton de déconnexion.
+La V3 expose au titulaire une liste paginée de ses sessions actives avec un identifiant public opaque distinct du jeton et de son condensat. Les sessions héritées gardent une date de création inconnue. Le titulaire peut révoquer une autre session ou toutes les autres ; la session courante utilise le bouton de déconnexion. Depuis la V4, le module confiance enregistre des signaux anti-abus (adresse IP, identifiant d'appareil `X-Alpha-Device`, navigateur) **uniquement sous forme de condensats HMAC**, avec une durée de conservation limitée.
 
 Changer le mot de passe nécessite le mot de passe actuel. Le nouveau hash, la révocation des anciennes sessions et la création de la session de remplacement sont atomiques. Les vérifications asynchrones du mot de passe ne constituent pas une autorisation durable : la session et le hash observé sont revalidés avant validation de la transaction.
 
@@ -180,13 +209,13 @@ Les requêtes API modifiantes exigent l'en-tête `X-Alpha-Client: web` et vérif
 
 Les autorisations sont contrôlées côté serveur sur les ressources et les participants, pas seulement par l'affichage des boutons. L'administrateur de plateforme n'obtient pas une lecture générale de toutes les conversations ou de tous les projets privés ; les outils de modération lui donnent un accès contextuel aux éléments signalés.
 
-Une limitation en mémoire protège les tentatives de connexion et d'inscription. Elle est locale au processus, réinitialisée au redémarrage, et ne constitue pas une protection complète contre les abus.
+Depuis la V4, les quotas sont persistés dans SQLite et couvrent notamment connexion, inscription, récupération, MFA, OAuth, fichiers, bac à sable, retraits et webhooks. Ils complètent les détecteurs du module confiance sans constituer une protection complète contre les abus.
 
 ### Contenus et confidentialité
 
 Les textes utilisateurs sont rendus comme du texte, et les liens de preuve sont limités à HTTP/HTTPS. Les liens d'intégration sont limités aux domaines HTTPS autorisés des fournisseurs ; ils ne donnent lieu à aucun téléchargement ou appel distant du serveur.
 
-Il n'existe pas de téléversement, d'analyse antivirus, d'environnement d'exécution de logiciel ou de bac à sable pour les projets des membres. Les essais de logiciels externes restent sous la responsabilité des participants : utiliser un environnement adapté, ne pas fournir d'identifiants personnels et ne pas suivre aveuglément une URL.
+Depuis la V4, les fichiers sont chiffrés au repos, mis en quarantaine jusqu'à leur analyse ClamAV et distribués par liens temporaires. Le bac à sable exécute un build dans un conteneur Docker jetable, sans réseau, avec limites de ressources, de préférence sur un hôte Docker dédié ; il ne prend pas en charge les applications graphiques ou mobiles. Les essais manuels de logiciels externes restent sous la responsabilité des participants : utiliser un environnement adapté, ne pas fournir d'identifiants personnels et ne pas suivre aveuglément une URL.
 
 La base stocke les messages, rapports et livraisons en clair au niveau applicatif. La confidentialité repose sur les autorisations de l'application et l'accès au fichier SQLite, pas sur un chiffrement de bout en bout. L'accès au serveur ou à une copie de la base donne accès à ces données. Les utilisateurs doivent aussi éviter de révéler des informations privées dans des publications ou avis publics.
 
@@ -194,21 +223,18 @@ L'export JSON est réservé aux responsables du projet autorisé et contient les
 
 ### Argent et conformité
 
-Le registre local est une simulation métier, **pas** un séquestre, un portefeuille électronique, une comptabilité réglementaire ou un système de paiement. Il n'y a ni carte bancaire, ni paiement mobile, ni retrait, ni KYC, ni garantie de remboursement. Les exemples de prix ou de récompenses n'engagent aucun versement réel.
+En mode `demo`, le registre local reste une simulation métier. En modes `sandbox` et `live`, les fonds sont détenus par des prestataires agréés : Alpha enregistre un séquestre **comptable** et déclenche paiements, remboursements et retraits par leur intermédiaire. Selon les pays servis, conserver des fonds pour compte de tiers ou tenir des portefeuilles peut exiger un agrément d'établissement de paiement ou de monnaie électronique (DSP2/DME2 en Europe, BEAC/COBAC en zone CEMAC, BCEAO en UEMOA) ou un montage avec un partenaire agréé. Les adaptateurs n'ont pas été validés en production auprès de chaque prestataire.
 
 Les en-têtes HTTP, validations et contraintes SQL présents constituent des protections initiales, pas un audit de sécurité ni une conformité juridique démontrée. Les tests exécutables du dépôt et le parcours manuel du README ne couvrent pas à eux seuls tous les navigateurs, les scénarios d'abus ou les exigences de production.
 
 ## Avant une mise en production
 
-Travaux à concevoir et valider avant une ouverture publique, et impérativement avant tout argent réel :
+La V4 livre les briques techniques de la liste établie en V3. Restent à faire avant une ouverture publique avec de l'argent réel :
 
-1. **Paiement et cadre légal** : sélectionner un PSP adapté à la marketplace et aux pays effectivement servis ; définir KYC/KYB, bénéficiaires, restrictions de pays et d'âge, obligations fiscales, facturation, contrats, licences, consentement, réclamations, remboursements et protection des données. Faire valider les parcours par des spécialistes compétents.
-2. **Fraude et abus** : limiter durablement les requêtes au-delà de l'authentification, protéger inscriptions et messagerie, détecter multi-comptes, collusion et avis artificiels, définir quotas, signalements, sanctions et procédures de recours.
-3. **Pièces jointes et logiciels** : avant d'ajouter un upload, prévoir stockage privé, limites, quarantaine, analyse, contrôle des types et liens d'accès temporaires. Toute exécution de logiciel non fiable nécessite une isolation dédiée ; ne jamais lancer des projets clients dans le processus API.
-4. **Cycle de vie des comptes** : vérification d'adresse, envoi d'emails fiable, récupération de mot de passe et procédures de suppression/export des données personnelles. Le changement de mot de passe et la révocation des sessions existent en V3 ; ils ne constituent pas une récupération de compte ni une authentification multifacteur.
-5. **Migrations et stockage** : étendre les migrations versionnées de la V2 pour les évolutions futures, tester sauvegardes et procédures de restauration à l'échelle réelle. Évaluer une migration vers PostgreSQL lorsque les besoins de concurrence, d'exploitation ou de volume le justifient, sans prétendre qu'elle existe aujourd'hui.
-6. **Traitement asynchrone avant paiement réel** : worker et outbox transactionnelle, clés d'idempotence, validation des signatures de webhooks, déduplication, reprises, rapprochement avec le PSP et journal financier auditable. Ne pas supposer qu'une transaction SQLite rend atomique un futur appel réseau.
-7. **Exploitation** : HTTPS, configuration sûre du reverse proxy, secrets et droits système, journaux structurés sans données sensibles, métriques, alertes, suivi des erreurs, sauvegardes cohérentes avec WAL, tests de restauration et politiques de rétention.
-8. **Validation continue** : compléter les tests d'autorisations et transitions, de concurrence, de confidentialité, de restauration et les parcours navigateur ; vérifier accessibilité et charge. Ne pas assimiler un build réussi à ces vérifications.
+1. **Cadre légal** : faire valider par des juristes les textes de `docs/legal` (modèles), le montage de séquestre et de portefeuille, la fiscalité et les obligations KYC/KYB des pays servis ; obtenir les agréments ou contrats de partenariat nécessaires.
+2. **Recette des prestataires** : tester chaque prestataire en `sandbox` puis avec de petits montants réels (Wave n'a pas d'environnement de test ; la documentation Kratos Pay est incomplète). Les rappels MTN MoMo et Orange Money ne sont pas signés : leur état est toujours confirmé par interrogation.
+3. **Décisions ouvertes** : conservation légale des pièces KYC lors d'une suppression de compte (la V4 les efface), outil de rechiffrement des secrets après rotation de `ALPHA_SECRETS_KEY` (conserver `ALPHA_SECRETS_KEY_PREVIOUS` en attendant), remboursements partiels.
+4. **Montée en charge** : bascule du runtime vers PostgreSQL (V5), stockage objet pour les fichiers, temps réel multi-instance, simulateur de paiement persistant.
+5. **Validation continue** : audit de sécurité externe, tests de charge, accessibilité, exercices de restauration réguliers.
 
 Ces éléments sont un travail restant à réaliser, pas des fonctionnalités activées par un changement de variable d'environnement.
