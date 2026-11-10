@@ -15,6 +15,7 @@ export const migrations = [
   { version: 11, name: 'integrations', file: new URL('./migrations/011-integrations.sql', import.meta.url) },
   { version: 12, name: 'trust', file: new URL('./migrations/012-trust.sql', import.meta.url) },
   { version: 13, name: 'privacy', file: new URL('./migrations/013-privacy.sql', import.meta.url) },
+  { version: 14, name: 'order-refunds', file: new URL('./migrations/014-order-refunds.sql', import.meta.url) },
 ];
 export const latestSchemaVersion = migrations[migrations.length - 1].version;
 
