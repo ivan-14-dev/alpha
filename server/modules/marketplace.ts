@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { all, one, run, transaction } from '../db.js';
 import { audit, canManageProject, HttpError, id, notify, now, param, requireUser } from '../core.js';
 import { paymentSummary } from '../finance.js';
+import { releaseOrderEscrow } from '../payments/escrow.js';
+import { paymentMode, type PaymentMode } from '../payments/mode.js';
 
 const router = Router();
 const identifier = z.string().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/);
@@ -25,7 +27,7 @@ const pageInput = {
 const versionInput = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 const revisionNote = z.string().trim().min(10).max(5000)
   .refine((value) => (value.match(/[\p{L}\p{N}]/gu)?.length ?? 0) >= 5, 'Précisez les corrections attendues.');
-type OrderEventKind = 'purchased' | 'delivered' | 'revision_requested' | 'completed' | 'disputed' | 'resumed';
+type OrderEventKind = 'purchased' | 'delivered' | 'revision_requested' | 'completed' | 'disputed' | 'resumed' | 'refunded';
 
 // Called inside the same transaction as the order transition and its audit.
 export function appendOrderEvent(orderId: string, actorId: string, kind: OrderEventKind, body = '') {
@@ -69,6 +71,7 @@ interface Order {
   seller_name: string;
   version: number;
   revision_requested: number;
+  payment_mode: PaymentMode;
 }
 
 // Project visibility can change after publication: never return a now-private link.
@@ -80,7 +83,7 @@ const listingSelect = `SELECT l.id,l.seller_id,
   EXISTS(SELECT 1 FROM orders o WHERE o.listing_id=l.id) AS terms_locked,
   'non_exclusive' AS license_type
   FROM listings l JOIN users u ON u.id=l.seller_id LEFT JOIN projects p ON p.id=l.project_id`;
-const orderSelect = `SELECT o.id,o.listing_id,o.buyer_id,o.seller_id,o.price_cents,o.status,o.delivery_text,o.created_at,o.version,o.revision_requested,
+const orderSelect = `SELECT o.id,o.listing_id,o.buyer_id,o.seller_id,o.price_cents,o.status,o.delivery_text,o.created_at,o.version,o.revision_requested,o.payment_mode,
   l.title AS listing_title,l.kind,l.license,l.deliverables,b.name AS buyer_name,s.name AS seller_name
   FROM orders o JOIN listings l ON l.id=o.listing_id JOIN users b ON b.id=o.buyer_id JOIN users s ON s.id=o.seller_id`;
 
@@ -98,6 +101,11 @@ function participantOrder(orderId: string, userId: string): Order {
   const order = one<Order>(`${orderSelect} WHERE o.id=? AND (o.buyer_id=? OR o.seller_id=?)`, orderId, userId, userId);
   if (!order) throw new HttpError(404, 'Commande introuvable.');
   return order;
+}
+
+/** Real-money orders are settled in the ledger (release/refund journals) instead of demo transactions. */
+function hasRealSettlement(orderId: string) {
+  return !!one("SELECT id FROM ledger_journals WHERE ref_type='order' AND ref_id=? AND kind IN ('order.released','order.refunded')", orderId);
 }
 
 function requireVersion(order: Order, version: number) {
@@ -221,6 +229,9 @@ router.post('/listings/:id/archive', (req, res) => {
 router.post('/listings/:id/buy', (req, res) => {
   const user = requireUser(req);
   const listingId = pathId(req);
+  if (paymentMode() !== 'demo') {
+    throw new HttpError(409, 'Les achats passent par le paiement sécurisé : utilisez « Acheter » pour choisir un moyen de paiement.');
+  }
   const order = transaction(() => {
     const listing = listingById(listingId);
     if (listing.status !== 'active') throw new HttpError(409, 'Cette offre est archivée.');
@@ -248,12 +259,13 @@ router.get('/orders', (req, res) => {
   const values = query.role === 'all' ? [user.id, user.id] : [user.id];
   const orders = all<Order>(`${orderSelect} WHERE ${where} ORDER BY o.created_at DESC,o.id LIMIT ? OFFSET ?`, ...values, query.limit, query.offset);
   const total = one<{ total: number }>(`SELECT COUNT(*) AS total FROM orders o WHERE ${where}`, ...values)!.total;
-  res.json({ orders, total, limit: query.limit, offset: query.offset, payment_summary: paymentSummary(user.id), mode: 'demo' });
+  res.json({ orders, total, limit: query.limit, offset: query.offset, payment_summary: paymentSummary(user.id), mode: paymentMode() });
 });
 
 router.get('/orders/:id', (req, res) => {
   const user = requireUser(req);
-  res.json({ order: participantOrder(pathId(req), user.id), mode: 'demo' });
+  const order = participantOrder(pathId(req), user.id);
+  res.json({ order, mode: order.payment_mode });
 });
 
 router.get('/orders/:id/history', (req, res) => {
@@ -281,11 +293,11 @@ router.post('/orders/:id/deliver', (req, res) => {
     }
     run("UPDATE orders SET status='delivered',delivery_text=?,revision_requested=0,version=version+1 WHERE id=?", input.delivery_text, orderId);
     appendOrderEvent(orderId, user.id, 'delivered', input.delivery_text);
-    notify(existing.buyer_id, 'order', 'Votre commande démo est livrée', existing.listing_title, `/marketplace?view=orders&order=${orderId}`);
+    notify(existing.buyer_id, 'order', existing.payment_mode === 'demo' ? 'Votre commande démo est livrée' : 'Votre commande est livrée', existing.listing_title, `/marketplace?view=orders&order=${orderId}`);
     audit(user.id, 'marketplace.order.delivered', 'order', orderId);
     return participantOrder(orderId, user.id);
   });
-  res.json({ order, mode: 'demo' });
+  res.json({ order, mode: order.payment_mode });
 });
 
 router.post('/orders/:id/request-revision', (req, res) => {
@@ -303,7 +315,7 @@ router.post('/orders/:id/request-revision', (req, res) => {
     audit(user.id, 'marketplace.order.revision_requested', 'order', orderId);
     return participantOrder(orderId, user.id);
   });
-  res.json({ order, mode: 'demo' });
+  res.json({ order, mode: order.payment_mode });
 });
 
 router.post('/orders/:id/complete', (req, res) => {
@@ -318,13 +330,18 @@ router.post('/orders/:id/complete', (req, res) => {
     if (existing.status !== 'delivered') throw new HttpError(409, 'La commande doit être livrée avant son acceptation.');
     run("UPDATE orders SET status='completed',version=version+1 WHERE id=?", orderId);
     appendOrderEvent(orderId, user.id, 'completed');
+    if (existing.payment_mode !== 'demo') {
+      releaseOrderEscrow(orderId, user.id);
+      audit(user.id, 'marketplace.order.completed', 'order', orderId, String(existing.price_cents));
+      return participantOrder(orderId, user.id);
+    }
     run("INSERT INTO transactions (id,user_id,order_id,kind,amount_cents,status,mode) VALUES (?,?,?,'sale',?,'completed','demo')",
       id(), existing.seller_id, orderId, existing.price_cents);
     notify(existing.seller_id, 'payment', 'Livraison acceptée — gain démo enregistré', 'Aucun argent réel n’est versé.', `/marketplace?view=orders&order=${orderId}`);
     audit(user.id, 'demo.marketplace.completed', 'order', orderId, String(existing.price_cents));
     return participantOrder(orderId, user.id);
   });
-  res.json({ order, mode: 'demo' });
+  res.json({ order, mode: order.payment_mode });
 });
 
 router.post('/orders/:id/dispute', (req, res) => {
@@ -336,7 +353,7 @@ router.post('/orders/:id/dispute', (req, res) => {
     if (existing.status !== 'paid' && existing.status !== 'delivered') {
       throw new HttpError(409, 'Seules les commandes en attente de livraison ou d’acceptation peuvent être mises en litige. Pour une commande terminée, contactez la modération.');
     }
-    if (one("SELECT id FROM transactions WHERE order_id=? AND kind IN ('sale','refund') AND status IN ('completed','pending')", orderId)) {
+    if (one("SELECT id FROM transactions WHERE order_id=? AND kind IN ('sale','refund') AND status IN ('completed','pending')", orderId) || hasRealSettlement(orderId)) {
       throw new HttpError(409, 'Cette commande possède une opération financière finalisée ou en cours. Contactez la modération.');
     }
     run("UPDATE orders SET status='disputed',version=version+1 WHERE id=?", orderId);
@@ -344,11 +361,13 @@ router.post('/orders/:id/dispute', (req, res) => {
     run("INSERT INTO moderation_reports (id,reporter_id,target_type,target_id,reason) VALUES (?,?,'order',?,?)",
       id(), user.id, orderId, input.reason);
     notify(existing.buyer_id === user.id ? existing.seller_id : existing.buyer_id,
-      'dispute', 'Litige ouvert sur une commande démo', 'La modération examinera le signalement. Aucun remboursement automatique.', `/marketplace?view=orders&order=${orderId}`);
+      'dispute', existing.payment_mode === 'demo' ? 'Litige ouvert sur une commande démo' : 'Litige ouvert sur une commande',
+      existing.payment_mode === 'demo' ? 'La modération examinera le signalement. Aucun remboursement automatique.' : 'Les fonds restent en séquestre pendant l’examen par la modération.',
+      `/marketplace?view=orders&order=${orderId}`);
     audit(user.id, 'marketplace.order.disputed', 'order', orderId);
     return participantOrder(orderId, user.id);
   });
-  res.json({ order, mode: 'demo' });
+  res.json({ order, mode: order.payment_mode });
 });
 
 export default router;
