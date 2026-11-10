@@ -3,8 +3,13 @@ import { z } from 'zod';
 import { all, one, run, transaction } from '../db.js';
 import { audit, canReadProject, HttpError, id, isPublicPost, notify, now, param, requireAdmin, requireUser } from '../core.js';
 import { appendOrderEvent } from './marketplace.js';
+import adminRouter from '../trust/admin.js';
+import { escrow, orderEventsAcceptRefunded, refundDisputedOrder } from '../trust/disputes.js';
+import memberRouter from '../trust/member.js';
 
 const router = Router();
+router.use(memberRouter);
+router.use('/admin', adminRouter);
 const targetTypes = ['project', 'post', 'listing', 'mission', 'order', 'user'] as const;
 type TargetType = typeof targetTypes[number];
 type Report = {
@@ -24,7 +29,7 @@ const reportInput = z.object({
 const decisionInput = z.object({
   status: z.enum(['reviewing', 'resolved', 'dismissed']),
   decision: z.string().trim().min(10).max(4000),
-  resolution: z.enum(['in_progress', 'changes_requested', 'submitted', 'accepted', 'cancelled', 'paid', 'delivered']).optional(),
+  resolution: z.enum(['in_progress', 'changes_requested', 'submitted', 'accepted', 'cancelled', 'paid', 'delivered', 'refunded']).optional(),
   revision_note: z.string().trim().min(10).max(2000).optional(),
 }).strict();
 
@@ -125,6 +130,7 @@ function contextFor(report: Report) {
         title: order.title, status: order.status, delivery_text: order.delivery_text,
         version: order.version, revision_requested: order.revision_requested,
         settlement_recorded: hasOrderSettlement(report.target_id),
+        payment_mode: escrow.orderPaymentMode(report.target_id),
       } : null;
     }
     case 'project':
@@ -234,7 +240,24 @@ router.post('/reports/:id/resolve', (req, res) => {
         ? 'La modération a annulé cette mission. Aucun versement ni remboursement n’a été effectué.'
         : 'La modération a levé le litige. Consultez votre mission pour poursuivre le processus ; aucun versement automatique n’a été effectué.');
     }
-    if (mustResume && order) {
+    if (mustResume && order && input.resolution === 'refunded') {
+      if (hasOrderSettlement(order.id)) {
+        throw new HttpError(409, 'Une vente ou un remboursement est déjà enregistré. Une correction financière est nécessaire et sort du périmètre de cette démonstration.');
+      }
+      // Real escrow refund (sandbox/live), atomically with the decision: any failure rolls the whole resolution back.
+      refundDisputedOrder(order.id, admin.id, input.decision);
+      if (one<{ status: string }>('SELECT status FROM orders WHERE id=?', order.id)?.status !== 'refunded') {
+        run("UPDATE orders SET status='refunded',version=version+1 WHERE id=?", order.id);
+      }
+      const body = `Remboursement intégral à l’acheteur décidé par la modération : ${input.decision}`.slice(0, 2000);
+      if (orderEventsAcceptRefunded()) {
+        run(`INSERT INTO order_events (id,order_id,actor_id,kind,body,order_version,created_at)
+          SELECT ?,id,?,'refunded',?,version,? FROM orders WHERE id=?`, id(), admin.id, body, now(), order.id);
+      } else {
+        appendOrderEvent(order.id, admin.id, 'resumed', body);
+      }
+      notifyParticipants('order', order.id, 'La modération a clôturé le litige par un remboursement intégral de l’acheteur depuis le séquestre.');
+    } else if (mustResume && order) {
       if (!['paid', 'delivered'].includes(input.resolution!)) throw new HttpError(400, 'Une commande peut reprendre uniquement à l’état payée (démo) ou livrée.');
       if (hasOrderSettlement(order.id)) {
         throw new HttpError(409, 'Une vente ou un remboursement est déjà enregistré. Une correction financière est nécessaire et sort du périmètre de cette démonstration.');
