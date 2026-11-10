@@ -1,0 +1,90 @@
+/* Privacy & legal (OWNER: privacy module). Every selector is prefixed with `legal-` or `privacy-` to avoid collisions. */
+
+/* Legal documents (/legal/:doc). */
+.legal-layout{display:grid;grid-template-columns:230px minmax(0,1fr);gap:22px;align-items:start}
+.legal-aside{position:sticky;top:90px;display:flex;flex-direction:column;gap:14px;max-height:calc(100vh - 110px);overflow:auto}
+.legal-aside h2{margin:0 0 8px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#8f8a9e}
+.legal-nav ul,.legal-toc ol{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:2px}
+.legal-nav a,.legal-toc a{display:flex;align-items:center;gap:7px;padding:6px 9px;border-radius:8px;font-size:11.5px;line-height:1.4;color:#6b5a78;text-decoration:none;overflow-wrap:anywhere}
+.legal-nav a:hover,.legal-toc a:hover{background:var(--purple-light,#efecfc);color:var(--purple,#6854df)}
+.legal-nav a.active{background:var(--purple-light,#efecfc);color:var(--purple,#6854df);font-weight:600}
+.legal-nav li>.badge{margin:2px 0 4px 29px}
+.legal-document{min-width:0}
+.legal-document h1{margin:0;font-size:22px}
+.legal-prose{color:#4f4560;font-size:13.5px;line-height:1.75;max-width:78ch}
+.legal-prose h2{font-size:17px;margin:30px 0 10px;scroll-margin-top:90px}
+.legal-prose h3{font-size:14px;margin:22px 0 8px;scroll-margin-top:90px}
+.legal-prose h4{font-size:13px;margin:18px 0 6px;scroll-margin-top:90px}
+.legal-prose h2:first-child,.legal-prose h3:first-child{margin-top:0}
+.legal-prose ul,.legal-prose ol{padding-left:22px;margin:10px 0}
+.legal-prose li{margin:4px 0}
+.legal-prose a{color:var(--purple,#6854df);text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+.legal-prose code{font-size:12px;background:#f5f3fb;border-radius:4px;padding:1px 4px}
+.legal-prose hr{border:0;border-top:1px solid var(--line,#ececf2);margin:24px 0}
+.legal-notice{margin:14px 0;padding:12px 16px;border-left:3px solid #e0a542;background:#fdf6ec;border-radius:0 10px 10px 0;color:#7d5a26}
+.legal-notice p{margin:4px 0}
+.legal-table{margin:14px 0}
+.legal-table td,.legal-table th{vertical-align:top;font-size:12px;line-height:1.55}
+.legal-accept{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap}
+.legal-accepted{margin:0;color:#3f8a63;font-weight:600;font-size:12px}
+.legal-admin-note .alert{margin:0}
+
+/* Settings › Données personnelles. */
+.privacy-controls:focus{outline:none}
+.privacy-controls:focus-visible{outline:3px solid #a798f2;outline-offset:3px}
+.privacy-panel{padding-bottom:18px;border-bottom:1px solid var(--line,#ececf2)}
+.privacy-panel:last-child{border-bottom:0;padding-bottom:0}
+.privacy-panel h3{display:flex;align-items:center;gap:8px;margin:0 0 6px;font-size:14px}
+.privacy-panel-heading{align-items:flex-start}
+.privacy-panel-heading>div{flex:1;min-width:0}
+.privacy-panel-heading .button{flex-shrink:0}
+.privacy-list{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:8px}
+.privacy-list li{padding:9px 12px;border:1px solid var(--line,#ececf2);border-radius:10px;flex-wrap:wrap}
+.privacy-consents{list-style:none;margin:10px 0;padding:0;display:flex;flex-direction:column;gap:10px}
+.privacy-toggle{display:flex;align-items:flex-start;gap:10px;cursor:pointer}
+.privacy-toggle input{width:auto;margin-top:3px;accent-color:var(--purple,#6854df);flex-shrink:0}
+.privacy-toggle>span{display:flex;flex-direction:column;gap:2px;min-width:0}
+.privacy-toggle strong{font-size:12.5px}
+.privacy-warning{display:block;margin:6px 0;padding:8px 12px;border-radius:9px;background:#fdf6ec;border:1px solid #f3e2c8;color:#8b6a36;font-size:12px}
+.privacy-warning .button{margin-left:8px}
+.privacy-history summary{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:12px;color:#6b5a78}
+.privacy-history ul{margin:8px 0 0;padding-left:20px}
+.privacy-danger-zone{border:1px solid #f2d2d2;border-radius:12px;padding:16px 18px}
+.privacy-danger-zone h3{color:#b44a4a}
+.privacy-blockers{margin:6px 0 12px;padding-left:22px;color:#8f3f3f;font-size:12.5px}
+.privacy-blockers li{margin:4px 0}
+.privacy-scheduled{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.privacy-scheduled p{margin:0}
+.privacy-erasure-form{margin-top:12px;max-width:520px}
+.privacy-error-text{color:#b44a4a}
+
+/* Admin console (/admin/privacy). */
+.privacy-stats{margin-bottom:4px}
+.privacy-filters{flex-wrap:wrap;align-items:flex-end}
+.privacy-filters .field{margin:0;min-width:140px}
+.privacy-actions{flex-wrap:wrap}
+.privacy-register td{vertical-align:top;font-size:11.5px;line-height:1.5;min-width:140px}
+.privacy-fieldset{border:1px solid var(--line,#ececf2);border-radius:10px;padding:10px 14px;display:flex;flex-wrap:wrap;gap:16px;margin:0}
+.privacy-fieldset legend{padding:0 6px}
+.privacy-inline-check{display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer}
+.privacy-inline-check input{width:auto;accent-color:var(--purple,#6854df)}
+.privacy-breach-form{max-height:70vh;overflow:auto;padding-right:4px}
+
+@media(max-width:900px){
+  .legal-layout{grid-template-columns:1fr}
+  .legal-aside{position:static;max-height:none;overflow:visible}
+  .legal-toc{display:none}
+}
+
+@media print{
+  .sidebar,.topbar,.site-footer,.legal-aside,.legal-print,.legal-accept,.legal-admin-note,.page-heading .button{display:none!important}
+  .main-shell{margin-left:0!important}
+  .content{padding:0!important}
+  .legal-layout{display:block}
+  .legal-document{border:0!important;box-shadow:none!important}
+  .legal-prose{max-width:none;color:#000;font-size:11pt}
+  .legal-prose a{color:#000}
+  .legal-prose a[href^="http"]::after{content:" (" attr(href) ")";font-size:9pt}
+  .legal-prose h2,.legal-prose h3{break-after:avoid}
+  .legal-table tr{break-inside:avoid}
+}
