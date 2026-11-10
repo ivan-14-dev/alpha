@@ -17,6 +17,7 @@ const { queueEmail, deliverQueuedEmails, setMailTransportForTests, renderEmail }
 const { registerJob, runJob, listJobs } = await import('../server/platform/jobs.js');
 const { recordLegalAcceptance, pendingRequiredDocuments } = await import('../server/platform/legal.js');
 const { latestSchemaVersion } = await import('../server/migrations.js');
+const { readProviderConfig, describeProviderConfig, saveProviderConfig, enabledProviders, activeEnvironment } = await import('../server/payments/config.js');
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -89,7 +90,7 @@ test('V4 platform foundation', async (t) => {
       assert.deepEqual(ran, []);
     });
     await tick();
-    assert.equal(one("SELECT key FROM platform_settings WHERE key='nest.outer'")?.key, 'nest.outer');
+    assert.equal(one<{ key: string }>("SELECT key FROM platform_settings WHERE key='nest.outer'")?.key, 'nest.outer');
     assert.equal(one("SELECT key FROM platform_settings WHERE key='nest.inner'"), undefined);
     assert.deepEqual(ran.sort(), ['inner-kept', 'outer']);
     assert.throws(() => transaction(() => { afterCommit(() => { ran.push('rolled-back'); }); throw new Error('outer failure'); }));
@@ -115,7 +116,7 @@ test('V4 platform foundation', async (t) => {
     assert.throws(() => postJournal({ idempotencyKey: 'overdraw', kind: 'mission.paid', mode: 'sandbox', currency: 'EUR', refType: 'mission', refId: 'm1',
       legs: [{ account: escrow, amountMinor: -6000 }, { account: tester, amountMinor: 6000 }], nonNegative: [escrow] }), /Solde insuffisant/);
     assert.equal(balance(tester, 'sandbox', 'EUR'), 0);
-    assert.equal(one("SELECT COUNT(*) AS count FROM ledger_journals WHERE idempotency_key='overdraw'")!.count, 0);
+    assert.equal(one<{ count: number }>("SELECT COUNT(*) AS count FROM ledger_journals WHERE idempotency_key='overdraw'")!.count, 0);
     assert.throws(() => run('UPDATE ledger_entries SET amount_minor=1'), /immuable|immutable|interdit/i);
     assert.throws(() => run('DELETE FROM ledger_journals'), /immuable|immutable|interdit/i);
     assert.ok(ledgerIsBalanced());
@@ -167,7 +168,7 @@ test('V4 platform foundation', async (t) => {
     assert.equal(failed.attempts, 1);
     assert.match(failed.last_error, /SMTP down/);
     assert.ok(Date.parse(failed.send_after) > Date.now());
-    assert.equal(one("SELECT COUNT(*) AS count FROM email_outbox WHERE to_address='rolled@example.test'")!.count, 0);
+    assert.equal(one<{ count: number }>("SELECT COUNT(*) AS count FROM email_outbox WHERE to_address='rolled@example.test'")!.count, 0);
   });
 
   await t.test('jobs record runs and failures without overlapping', async () => {
@@ -181,6 +182,36 @@ test('V4 platform foundation', async (t) => {
     assert.equal(job.runs, 2);
     assert.equal(job.failures, 1);
     assert.equal(job.last_status, 'failed');
+  });
+
+  await t.test('provider configs are per environment, secrets stay sealed and invalid configs cannot be enabled', () => {
+    assert.equal(activeEnvironment(), null);
+    assert.deepEqual(enabledProviders(), []);
+    assert.equal(readProviderConfig('simulator', 'sandbox')?.id, 'simulator');
+    assert.equal(readProviderConfig('simulator', 'live'), null);
+    assert.throws(() => saveProviderConfig('simulator', 'live', { enabled: true, settings: { currency: 'EUR' }, secrets: {} }, 'admin-v4'), /simulateur/);
+    assert.throws(() => saveProviderConfig('simulator', 'sandbox', { enabled: true, settings: { unknown: 'x' }, secrets: {} }, 'admin-v4'), /Champ inconnu/);
+    assert.throws(() => saveProviderConfig('simulator', 'sandbox', { enabled: true, settings: { webhook_secret: 'x' }, secrets: {} }, 'admin-v4'), /secrets/);
+    assert.throws(() => saveProviderConfig('simulator', 'sandbox', { enabled: true, settings: { currency: 'GBP' }, secrets: {} }, 'admin-v4'), /non autorisée/);
+    assert.throws(() => saveProviderConfig('simulator', 'sandbox', { enabled: true, settings: {}, secrets: {} }, 'admin-v4'), /requis/);
+    const saved = saveProviderConfig('simulator', 'sandbox', { enabled: true, settings: { currency: 'XAF' }, secrets: { webhook_secret: 'whsec_simulator_123456' } }, 'admin-v4');
+    assert.equal(saved.secrets.webhook_secret.configured, true);
+    assert.ok(!JSON.stringify(saved).includes('whsec_simulator_123456'));
+    assert.match(saved.webhook_url, /\/api\/payments\/webhooks\/simulator$/);
+    assert.equal(readProviderConfig('simulator', 'sandbox')!.secrets.webhook_secret, 'whsec_simulator_123456');
+    saveProviderConfig('simulator', 'sandbox', { enabled: true, settings: { currency: 'XAF' }, secrets: { webhook_secret: undefined } }, 'admin-v4');
+    assert.equal(readProviderConfig('simulator', 'sandbox')!.secrets.webhook_secret, 'whsec_simulator_123456');
+    saveProviderConfig('simulator', 'sandbox', { enabled: false, settings: { currency: 'XAF' }, secrets: { webhook_secret: null } }, 'admin-v4');
+    assert.equal(readProviderConfig('simulator', 'sandbox'), null);
+    assert.equal(describeProviderConfig('simulator', 'sandbox').secrets.webhook_secret.configured, false);
+    setSetting('payments.mode', 'sandbox', 'admin-v4');
+    try {
+      assert.equal(activeEnvironment(), 'sandbox');
+      assert.deepEqual(enabledProviders(), []);
+      saveProviderConfig('simulator', 'sandbox', { enabled: true, settings: { currency: 'XAF' }, secrets: {} }, 'admin-v4');
+      assert.deepEqual(enabledProviders({ currency: 'XAF', method: 'mobile_money' }).map((provider) => provider.id), ['simulator']);
+      assert.deepEqual(enabledProviders({ currency: 'GBP' }), []);
+    } finally { setSetting('payments.mode', 'demo', 'admin-v4'); }
   });
 
   await t.test('legal acceptances are versioned and idempotent', () => {
