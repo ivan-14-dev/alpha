@@ -1,0 +1,39 @@
+/* Integrations page and admin section. OWNER: integrations module. */
+.intg-accounts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.intg-account{display:flex;flex-direction:column;gap:12px}
+.intg-account-title{display:flex;align-items:center;gap:9px}
+.intg-account-title h3{font-size:14px}
+.intg-account-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:auto}
+.intg-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;overflow-wrap:anywhere}
+.intg-copy{display:flex;gap:8px;align-items:stretch}
+.intg-copy input{flex:1;min-width:0;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px}
+.intg-secret{border:1px solid #ecd9a8;background:#fffaf0;border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.intg-secret h3{font-size:13px;color:#8a6a2c}
+.intg-secret ol{margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px;font-size:12px;color:#5d4f69;overflow-wrap:anywhere}
+.intg-checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 16px;margin:0;padding:0;border:0}
+.intg-check-group{border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:flex;flex-direction:column;gap:8px}
+.intg-check-group legend{font-size:12px;font-weight:600;color:#5d4f69;padding:0 4px}
+.intg-checkbox{display:flex;align-items:flex-start;gap:8px;font-size:12px;color:#5d4f69;font-weight:500;line-height:1.4}
+.intg-checkbox input{margin-top:2px}
+.intg-checkbox code{font-size:10px;color:#8b7b99}
+.intg-item{display:flex;flex-direction:column;gap:10px;padding:16px 0;border-bottom:1px solid var(--line)}
+.intg-item:last-child{border-bottom:0}
+.intg-item-head{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px}
+.intg-item-title{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-width:0}
+.intg-item-title strong{overflow-wrap:anywhere}
+.intg-actions{display:flex;flex-wrap:wrap;gap:6px}
+.intg-meta{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:11px;color:#7d708a}
+.intg-repos{max-height:320px;overflow-y:auto;border:1px solid var(--line);border-radius:10px}
+.intg-repo{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px}
+.intg-repo:last-child{border-bottom:0}
+.intg-repo span{overflow-wrap:anywhere}
+.intg-payload{max-height:320px;overflow:auto;background:#faf8fd;border:1px solid var(--line);border-radius:10px;padding:12px;font-size:11px;white-space:pre-wrap;overflow-wrap:anywhere}
+.intg-error-text{color:#b5535d;font-size:11px;max-width:280px;overflow-wrap:anywhere}
+.intg-stats{grid-template-columns:repeat(4,minmax(0,1fr));margin:0}
+.intg-stat-list{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:3px;font-size:11px;color:#7d708a}
+.intg-provider-form{display:flex;flex-direction:column;gap:14px}
+.intg-filters{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.intg-filters .field{min-width:160px}
+.intg-inline{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+@media (max-width:1100px){.intg-accounts{grid-template-columns:repeat(2,minmax(0,1fr))}.intg-stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:640px){.intg-accounts,.intg-stats{grid-template-columns:minmax(0,1fr)}.intg-copy{flex-direction:column}}
