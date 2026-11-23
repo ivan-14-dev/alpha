@@ -104,7 +104,7 @@ services:
     logging: *logging
 
   mailpit:
-    image: axllent/mailpit:v1.33
+    image: axllent/mailpit:v1.34
     profiles: [dev]
     restart: unless-stopped
     # Web UI on http://127.0.0.1:8025 ; set SMTP_URL=smtp://mailpit:1025 in .env.
